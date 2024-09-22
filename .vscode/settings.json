@@ -1,0 +1,34 @@
+{
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "[markdown]": {
+    "editor.formatOnSave": false
+  },
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "css.lint.unknownAtRules": "ignore",
+  "files.exclude": {
+    "**/build": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/.vercel": true,
+    ".pulumi": true,
+    "**/target": true,
+    "**/.DS_Store": true,
+    "**/.git": true,
+    "**/.hg": true,
+    "**/.svn": true,
+    "**/.next": true,
+    "**/CVS": true,
+    "**/Thumbs.db": true,
+    "**/.svelte-kit": true,
+    "**/.netlify": true,
+    "**/.yarn": true
+  },
+}

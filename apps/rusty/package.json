@@ -1,0 +1,6 @@
+{
+  "name": "@gangsta/rusty",
+  "version": "0.0.1",
+  "packageManager": "yarn@3.1.0",
+  "main": "bindings.ts"
+}

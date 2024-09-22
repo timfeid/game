@@ -1,0 +1,13 @@
+{
+  "name": "@gangsta/data",
+  "packageManager": "yarn@4.4.1",
+  "devDependencies": {
+    "@types/node": "*",
+    "prisma": "5.19.0",
+    "ts-node": "*",
+    "typescript": "*"
+  },
+  "dependencies": {
+    "@prisma/client": "5.19.0"
+  }
+}

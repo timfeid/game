@@ -1,0 +1,4 @@
+[workspace]
+members = ["apps/rusty", "apps/frontend/src-tauri"]
+resolver = "2"
+default-members = ["apps/rusty"]
