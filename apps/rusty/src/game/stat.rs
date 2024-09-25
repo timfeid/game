@@ -1,7 +1,9 @@
-use std::fmt;
 use std::fmt::Debug;
+use std::{collections::HashMap, fmt};
 
 use serde::{Deserialize, Serialize};
+use ulid::Ulid;
+use uuid::uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Stat {
@@ -9,14 +11,15 @@ pub struct Stat {
     pub intensity: i8,
 }
 pub trait Stats: Debug + Send + Sync {
-    fn add_stat(&mut self, stat: Stat);
+    fn add_stat(&mut self, id: String, stat: Stat);
+    fn remove_stat(&mut self, id: String);
     fn get_stat_value(&self, stat_type: StatType) -> i8;
     fn modify_stat(&mut self, stat_type: StatType, intensity: i8);
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
 pub struct StatManager {
-    pub stats: Vec<Stat>,
+    pub stats: HashMap<String, Stat>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,29 +64,42 @@ impl fmt::Display for StatType {
 }
 
 impl Stats for StatManager {
-    fn add_stat(&mut self, stat: Stat) {
-        self.stats.push(stat);
+    fn add_stat(&mut self, id: String, stat: Stat) {
+        self.stats.insert(id, stat);
     }
 
     fn get_stat_value(&self, stat_type: StatType) -> i8 {
-        self.stats
+        let values = &self.stats;
+        values
             .iter()
-            .filter(|s| s.stat_type == stat_type)
-            .map(|s| s.intensity)
+            .filter(|(_id, s)| s.stat_type == stat_type)
+            .map(|(_id, s)| s.intensity)
             .sum()
     }
 
     fn modify_stat(&mut self, stat_type: StatType, intensity: i8) {
-        for stat in &mut self.stats {
+        for stat in &mut self.stats.values_mut() {
             if stat.stat_type == stat_type {
                 stat.intensity += intensity;
             }
         }
     }
+
+    fn remove_stat(&mut self, id: String) {
+        self.stats.remove(&id);
+    }
 }
 
 impl StatManager {
     pub fn new(stats: Vec<Stat>) -> Self {
-        Self { stats }
+        let mut s = Self {
+            stats: HashMap::new(),
+        };
+
+        for stat in stats {
+            s.add_stat(Ulid::new().to_string(), stat);
+        }
+
+        s
     }
 }

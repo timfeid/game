@@ -11,7 +11,11 @@ pub enum TurnPhase {
     Upkeep,
     Draw,
     Main,
-    Combat,
+    BeginningOfCombat,
+    DeclareAttackers,
+    DeclareBlockers,
+    CombatDamage,
+    EndOfCombat,
     End,
 }
 
@@ -43,9 +47,13 @@ impl Turn {
             TurnPhase::Untap => TurnPhase::Upkeep,
             TurnPhase::Upkeep => TurnPhase::Draw,
             TurnPhase::Draw => TurnPhase::Main,
-            TurnPhase::Main => TurnPhase::Combat,
-            TurnPhase::Combat => TurnPhase::End,
-            TurnPhase::End => TurnPhase::Untap, // Reset to Untap after End phase
+            TurnPhase::Main => TurnPhase::BeginningOfCombat,
+            TurnPhase::BeginningOfCombat => TurnPhase::DeclareAttackers,
+            TurnPhase::DeclareAttackers => TurnPhase::DeclareBlockers,
+            TurnPhase::DeclareBlockers => TurnPhase::CombatDamage,
+            TurnPhase::CombatDamage => TurnPhase::EndOfCombat,
+            TurnPhase::EndOfCombat => TurnPhase::End,
+            TurnPhase::End => TurnPhase::Untap,
         };
     }
 }

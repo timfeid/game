@@ -9,12 +9,14 @@ use textwrap::fill;
 use tokio::sync::Mutex;
 
 use crate::error::AppError;
+use crate::game::action;
 use crate::game::effects::{EffectManager, EffectTarget};
 
 use super::action::{
-    ActionTriggerType, CardAction, CardActionTrigger, CardActionWrapper, PlayerAction,
-    PlayerActionTrigger,
+    ActionTriggerType, Attachable, CardAction, CardActionTrigger, CardActionWrapper, PlayerAction,
+    PlayerActionTrigger, ResetCardAction,
 };
+use super::effects::EffectID;
 use super::mana::ManaType;
 use super::turn::Turn;
 use super::{
@@ -27,12 +29,13 @@ use super::{
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Type)]
 pub enum CardType {
-    Monster,
+    Creature,
     Enchantment,
+    Equipment,
     Instant,
     Trap,
     Artifact,
-    Mana(ManaType),
+    Mana,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
@@ -50,18 +53,21 @@ pub struct Card {
     pub card_type: CardType,
     pub current_phase: CardPhase,
     #[serde(skip_serializing, skip_deserializing)]
-    pub target: Option<EffectTarget>, // Can be a Player or another Card
-    #[serde(skip_serializing, skip_deserializing)]
-    pub attached_cards: Vec<Arc<Mutex<Card>>>,
+    pub target: Option<EffectTarget>,
     pub tapped: bool,
     #[serde(skip_serializing, skip_deserializing)]
     pub stats: StatManager,
     #[serde(skip_serializing, skip_deserializing)]
-    // pub actions: Vec<Arc<Mutex<Box<dyn CardAction + Send + Sync + 'static>>>>, // Actions attached to the card
     pub triggers: Vec<CardActionTrigger>,
     pub cost: Vec<ManaType>,
     #[serde(skip_serializing, skip_deserializing)]
     pub owner: Option<Arc<Mutex<Player>>>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub effect_ids: Vec<EffectID>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub attached: Option<Arc<Mutex<Card>>>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub action_target: Option<EffectTarget>,
 }
 
 impl Card {
@@ -74,7 +80,8 @@ impl Card {
         stats: Vec<Stat>,
         cost: Vec<ManaType>,
     ) -> Self {
-        Self {
+        let mut card = Self {
+            effect_ids: vec![],
             name: name.to_string(),
             description: description.to_string(),
             tapped: false,
@@ -82,34 +89,38 @@ impl Card {
             triggers,
             current_phase: phase,
             target: None,
-            attached_cards: vec![],
             stats: StatManager::new(stats),
             cost,
             owner: None,
-        }
+            attached: None,
+            action_target: None,
+        };
+        card.triggers.push(CardActionTrigger::new(
+            ActionTriggerType::OnCardDestroyed,
+            Arc::new(ResetCardAction {}),
+        ));
+
+        card
     }
 
-    pub fn add_trigger(&mut self, trigger: CardActionTrigger) {
-        self.triggers.push(trigger);
-    }
-
-    // Collect phase-based triggers
-    pub async fn collect_phase_based_actions(
-        card: &Arc<Mutex<Card>>, // The card is now passed as Arc<Mutex<Card>>
+    pub fn collect_phase_based_actions_sync(
+        &self,
         turn: &Turn,
         trigger_type: ActionTriggerType,
+        card_arc: &Arc<Mutex<Card>>,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
-        let card = Arc::clone(card);
-        let card_l = card.lock().await;
-        let owner = card_l.owner.as_ref().unwrap();
+        let owner = match &self.owner {
+            Some(owner) => Arc::clone(owner),
+            None => return phase_based_actions,
+        };
 
-        for action_trigger in &card_l.triggers {
+        for action_trigger in &self.triggers {
             if let ActionTriggerType::PhaseBased(trigger_phase, trigger_target) =
                 &action_trigger.trigger_type
             {
-                let is_owner = Arc::ptr_eq(&turn.current_player, owner);
+                let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
                 if trigger_phase.contains(&turn.phase)
                     && match trigger_target {
                         super::action::TriggerTarget::Owner => is_owner,
@@ -118,74 +129,99 @@ impl Card {
                     }
                 {
                     phase_based_actions.push(Arc::new(CardActionWrapper {
-                        card: Arc::clone(&card),
+                        card: Arc::clone(card_arc),
                         action: action_trigger.action.clone(),
-                        owner: Arc::clone(&owner),
                     }));
                 }
             } else if &trigger_type == &action_trigger.trigger_type {
                 phase_based_actions.push(Arc::new(CardActionWrapper {
-                    card: Arc::clone(&card),
+                    card: Arc::clone(card_arc),
                     action: action_trigger.action.clone(),
-                    owner: Arc::clone(&owner),
-                }))
+                }));
             }
         }
 
         phase_based_actions
     }
 
-    // Manually trigger actions (e.g., when the card is tapped)
-    pub async fn tap(
-        card: &Arc<Mutex<Card>>, // The card is passed as Arc<Mutex<Card>>
-    ) -> Result<(), &str> {
-        let mut card_locked = card.lock().await;
+    pub async fn collect_manual_actions(
+        &self,
+        card_arc: Arc<Mutex<Card>>,
+        turn_phase: TurnPhase,
+    ) -> Vec<Arc<dyn Action + Send + Sync>> {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
-        if card_locked.tapped {
-            return Err("Card already tapped");
+        for action_trigger in &self.triggers {
+            match &action_trigger.trigger_type {
+                ActionTriggerType::Tap => {
+                    actions.push(Arc::new(CardActionWrapper {
+                        card: Arc::clone(&card_arc),
+                        action: action_trigger.action.clone(),
+                    }));
+                }
+                ActionTriggerType::ManualWithinPhases(mana_requirements, allowed_phases) => {
+                    if allowed_phases.contains(&turn_phase) {
+                        actions.push(Arc::new(CardActionWrapper {
+                            card: Arc::clone(&card_arc),
+                            action: action_trigger.action.clone(),
+                        }));
+                    }
+                }
+                ActionTriggerType::TapWithinPhases(allowed_phases) => {
+                    if allowed_phases.contains(&turn_phase) {
+                        actions.push(Arc::new(CardActionWrapper {
+                            card: Arc::clone(&card_arc),
+                            action: action_trigger.action.clone(),
+                        }));
+                    }
+                }
+                _ => {}
+            }
         }
-        println!("{} was tapped", card_locked.name);
 
-        card_locked.tapped = true;
-
-        Ok(())
+        actions
     }
 
-    // pub async fn trigger_tap(card: &Arc<Mutex<Card>>, game: &mut Game) {
-    //     let triggers = {
-    //         // Lock the card and clone the triggers, then release the lock
-    //         let card_locked = card.lock().await;
-    //         card_locked.triggers.clone()
-    //     };
+    pub async fn collect_phase_based_actions(
+        card_arc: &Arc<Mutex<Card>>,
+        turn: &Turn,
+        trigger_type: ActionTriggerType,
+    ) -> Vec<Arc<dyn Action + Send + Sync>> {
+        let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
-    //     // Now iterate over the triggers outside the lock
-    //     for trigger in triggers {
-    //         if let ActionTriggerType::Manual = trigger.trigger_type {
-    //             trigger.trigger(game, Arc::clone(card)).await;
-    //         }
-    //     }
-    // }
+        let card = card_arc.lock().await;
 
-    pub fn attach_card(&mut self, card: Arc<Mutex<Card>>) {
-        self.attached_cards.push(card);
-    }
+        let owner = match &card.owner {
+            Some(owner) => Arc::clone(owner),
+            None => return phase_based_actions,
+        };
 
-    pub fn play_on(&mut self, target: EffectTarget) {
-        println!("{} is played on {:?}", self.name, &target);
-        self.target = Some(target);
-    }
+        for action_trigger in &card.triggers {
+            if let ActionTriggerType::PhaseBased(trigger_phase, trigger_target) =
+                &action_trigger.trigger_type
+            {
+                let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
+                if trigger_phase.contains(&turn.phase)
+                    && match trigger_target {
+                        super::action::TriggerTarget::Owner => is_owner,
+                        super::action::TriggerTarget::Target => !is_owner,
+                        super::action::TriggerTarget::Any => true,
+                    }
+                {
+                    phase_based_actions.push(Arc::new(CardActionWrapper {
+                        card: Arc::clone(card_arc),
+                        action: action_trigger.action.clone(),
+                    }));
+                }
+            } else if &trigger_type == &action_trigger.trigger_type {
+                phase_based_actions.push(Arc::new(CardActionWrapper {
+                    card: Arc::clone(card_arc),
+                    action: action_trigger.action.clone(),
+                }));
+            }
+        }
 
-    pub fn cancel(&mut self) {
-        println!("{} has been cancelled.", self.name);
-        self.current_phase = CardPhase::Cancelled;
-    }
-
-    pub fn is_active(&self) -> bool {
-        // A card is active if it has effects and isn't complete or cancelled
-        // !self.effects.is_empty()
-        //     && self.current_phase != Phase::Complete
-        //     && self.current_phase != Phase::Cancelled
-        true
+        phase_based_actions
     }
 
     pub fn format_mana_cost(&self) -> String {
@@ -194,9 +230,7 @@ impl Card {
 
         for mana in &self.cost {
             match mana {
-                ManaType::Colorless => {
-                    colorless_count += 1;
-                }
+                ManaType::Colorless => colorless_count += 1,
                 _ => {
                     if colorless_count > 0 {
                         formatted_mana.push_str(&format!("{{{}C}} ", colorless_count));
@@ -207,84 +241,96 @@ impl Card {
             }
         }
 
-        // If there are any leftover colorless mana, add them to the string
         if colorless_count > 0 {
             formatted_mana.push_str(&format!("{{{}C}}", colorless_count));
         }
 
-        formatted_mana.trim_end().to_string() // Trim trailing space
+        formatted_mana.trim_end().to_string()
+    }
+
+    pub fn tap(&mut self) -> Result<(), &str> {
+        if self.tapped {
+            return Err("Card already tapped");
+        }
+
+        println!("{} was tapped", self.name);
+
+        self.tapped = true;
+
+        Ok(())
+    }
+
+    async fn collect_attached_actions(
+        card: &Arc<Mutex<Card>>,
+        target_card: &Arc<Mutex<Card>>,
+        game: &mut Game,
+    ) -> Option<Vec<Arc<dyn Action + Send + Sync>>> {
+        let attached_actions = Card::collect_phase_based_actions(
+            card,
+            &game.current_turn.clone().unwrap(),
+            ActionTriggerType::Attached,
+        )
+        .await;
+
+        if attached_actions.is_empty() {
+            None
+        } else {
+            Some(attached_actions)
+        }
     }
 
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
-        // Top border
         lines.push(format!("┌{}┐", "─".repeat(width - 2)));
-
-        // Card name centered
         lines.push(format!("│{:^width$}│", self.name, width = width - 2));
-
-        // Separator
         lines.push(format!("├{}┤", "─".repeat(width - 2)));
 
         let mana_costs_content = self.format_mana_cost();
-
-        // Action Points, Damage, Defense
-        let stats_content = format!(
-            " {} {:<width$} {}/{} ",
-            mana_costs_content,
-            " ",
+        let stats = format!(
+            "{}/{}",
             self.get_stat_value(StatType::Damage),
             self.get_stat_value(StatType::Defense),
-            width = width - 14,
         );
-        let content_width = width - 2; // -2 for borders
-        let stats_line = format!(
-            "│{:<content_width$}│",
-            stats_content,
-            content_width = content_width
+        let stats_content = format!(
+            " {} {: <width$} {} ",
+            mana_costs_content,
+            " ",
+            stats,
+            width = width - stats.len() - mana_costs_content.len() - 6
         );
-        lines.push(stats_line);
 
-        // Separator
+        lines.push(format!("│{}│", stats_content));
         lines.push(format!("├{}┤", "─".repeat(width - 2)));
 
-        // Description wrapped to fit within the card
-        let content_width = width - 4; // -2 for borders, -2 for padding
+        let content_width = width - 4;
         let description = fill(&self.description, content_width);
         for desc_line in description.lines() {
-            let desc_line_formatted = format!(
+            lines.push(format!(
                 "│ {: <content_width$}│",
                 desc_line,
                 content_width = content_width + 1
-            );
-            lines.push(desc_line_formatted);
+            ));
         }
 
-        // Fill the remaining lines if the description is short
-        let content_height = 8; // Adjust as needed
+        let content_height = 8;
         while lines.len() < content_height {
             lines.push(format!("│{: <width$}│", " ", width = width - 2));
         }
 
-        // Bottom border
         lines.push(format!("└{}┘", "─".repeat(width - 2)));
-
         lines
     }
 
     pub(crate) fn untap(&mut self) {
-        self.tapped = false
+        self.tapped = false;
     }
-
-    // pub fn add_action(&mut self, action: impl CardAction + Send + Sync + 'static) {
-    //     self.actions.push(Arc::new(Mutex::new(Box::new(action))));
-    // }
 }
 
 impl Stats for Card {
-    fn add_stat(&mut self, stat: Stat) {
-        self.stats.add_stat(stat);
+    fn add_stat(&mut self, id: String, stat: Stat) {
+        self.stats.add_stat(id, stat);
+        println!("{}", self.render(30).join("\n"));
     }
 
     fn get_stat_value(&self, stat_type: StatType) -> i8 {
@@ -294,4 +340,44 @@ impl Stats for Card {
     fn modify_stat(&mut self, stat_type: StatType, intensity: i8) {
         self.stats.modify_stat(stat_type, intensity);
     }
+
+    fn remove_stat(&mut self, id: String) {
+        self.stats.remove_stat(id);
+    }
+}
+
+pub mod card {
+    macro_rules! create_creature_card {
+        ($name:expr, $description:expr, $damage:expr, $defense:expr, $mana:expr) => {
+            Card::new(
+                $name,
+                $description,
+                vec![
+                    // Action to declare the creature as an attacker in the Declare Attackers phase
+                    CardActionTrigger::new(
+                        ActionTriggerType::TapWithinPhases(vec![TurnPhase::DeclareAttackers]),
+                        Arc::new(DeclareAttackerAction {}),
+                    ),
+                    // Action to manually declare the creature as a blocker in the Declare Blockers phase
+                    CardActionTrigger::new(
+                        ActionTriggerType::ManualWithinPhases(vec![], vec![TurnPhase::DeclareBlockers]),
+                        Arc::new(DeclareBlockerAction {}),
+                    ),
+                ],
+                // Card starts with a charging phase (this can be customized)
+                CardPhase::Charging(1),
+                // Card type is a Creature
+                CardType::Creature,
+                // Add the specified damage and defense stats
+                vec![
+                    Stat::new(StatType::Damage, $damage),
+                    Stat::new(StatType::Defense, $defense),
+                ],
+                // Specify the mana requirements for the creature card
+                vec![$mana],
+            )
+        };
+    }
+
+    pub(crate) use create_creature_card;
 }
