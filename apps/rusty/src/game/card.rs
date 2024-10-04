@@ -13,9 +13,10 @@ use crate::game::action;
 use crate::game::effects::{EffectManager, EffectTarget};
 
 use super::action::{
-    ActionTriggerType, Attachable, CardAction, CardActionTrigger, CardActionWrapper, PlayerAction,
-    PlayerActionTrigger, ResetCardAction,
+    ActionTriggerType, Attachable, CardAction, CardActionTarget, CardActionTrigger,
+    CardActionWrapper, CardRequiredTarget, PlayerAction, PlayerActionTrigger, ResetCardAction,
 };
+
 use super::effects::EffectID;
 use super::mana::ManaType;
 use super::turn::Turn;
@@ -31,11 +32,11 @@ use super::{
 pub enum CardType {
     Creature,
     Enchantment,
-    Equipment,
     Instant,
-    Trap,
+    Sorcery,
     Artifact,
-    Mana,
+    BasicLand(ManaType),
+    Land(Vec<ManaType>),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
@@ -55,7 +56,6 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub target: Option<EffectTarget>,
     pub tapped: bool,
-    #[serde(skip_serializing, skip_deserializing)]
     pub stats: StatManager,
     #[serde(skip_serializing, skip_deserializing)]
     pub triggers: Vec<CardActionTrigger>,
@@ -63,11 +63,12 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub owner: Option<Arc<Mutex<Player>>>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub effect_ids: Vec<EffectID>,
-    #[serde(skip_serializing, skip_deserializing)]
     pub attached: Option<Arc<Mutex<Card>>>,
     #[serde(skip_serializing, skip_deserializing)]
     pub action_target: Option<EffectTarget>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub damage_taken: i8,
+    pub is_countered: bool,
 }
 
 impl Card {
@@ -81,7 +82,6 @@ impl Card {
         cost: Vec<ManaType>,
     ) -> Self {
         let mut card = Self {
-            effect_ids: vec![],
             name: name.to_string(),
             description: description.to_string(),
             tapped: false,
@@ -94,13 +94,43 @@ impl Card {
             owner: None,
             attached: None,
             action_target: None,
+            damage_taken: 0,
+            is_countered: false,
         };
         card.triggers.push(CardActionTrigger::new(
             ActionTriggerType::OnCardDestroyed,
+            CardRequiredTarget::None,
             Arc::new(ResetCardAction {}),
         ));
 
         card
+    }
+
+    pub fn is_useless(&self, has_effects: bool) -> bool {
+        let has_triggers = self
+            .triggers
+            .iter()
+            .filter(|t| match &t.trigger_type {
+                ActionTriggerType::Tap => true,
+                ActionTriggerType::TapWithinPhases(vec) => true,
+                ActionTriggerType::ManualWithinPhases(vec, vec1) => true,
+                ActionTriggerType::PhaseBased(vec, trigger_target) => true,
+                ActionTriggerType::Attached => true,
+
+                ActionTriggerType::Sorcery => false,
+                ActionTriggerType::Instant => false,
+                ActionTriggerType::Detached => false,
+                ActionTriggerType::OnCardDestroyed => false,
+            })
+            .count()
+            > 0;
+
+        println!(
+            "has_triggers: {:?}\nhas_effects: {}\n\n\n",
+            has_triggers, has_effects
+        );
+
+        !has_triggers && !has_effects
     }
 
     pub fn collect_phase_based_actions_sync(
@@ -144,16 +174,39 @@ impl Card {
         phase_based_actions
     }
 
-    pub async fn collect_manual_actions(
+    pub async fn collect_attach_actions(
         &self,
         card_arc: Arc<Mutex<Card>>,
-        turn_phase: TurnPhase,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
         for action_trigger in &self.triggers {
             match &action_trigger.trigger_type {
+                ActionTriggerType::Attached => {
+                    actions.push(Arc::new(CardActionWrapper {
+                        card: Arc::clone(&card_arc),
+                        action: action_trigger.action.clone(),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        actions
+    }
+
+    pub async fn collect_manual_actions(
+        &self,
+        card_arc: Arc<Mutex<Card>>,
+        turn_phase: TurnPhase,
+    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool) {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+        let mut requires_tap = false;
+
+        for action_trigger in &self.triggers {
+            match &action_trigger.trigger_type {
                 ActionTriggerType::Tap => {
+                    requires_tap = true;
                     actions.push(Arc::new(CardActionWrapper {
                         card: Arc::clone(&card_arc),
                         action: action_trigger.action.clone(),
@@ -169,6 +222,7 @@ impl Card {
                 }
                 ActionTriggerType::TapWithinPhases(allowed_phases) => {
                     if allowed_phases.contains(&turn_phase) {
+                        requires_tap = true;
                         actions.push(Arc::new(CardActionWrapper {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
@@ -179,7 +233,7 @@ impl Card {
             }
         }
 
-        actions
+        (actions, requires_tap)
     }
 
     pub async fn collect_phase_based_actions(
@@ -249,6 +303,10 @@ impl Card {
     }
 
     pub fn tap(&mut self) -> Result<(), &str> {
+        if self.current_phase != CardPhase::Ready {
+            return Err("Card is not ready");
+        }
+
         if self.tapped {
             return Err("Card already tapped");
         }
@@ -348,7 +406,7 @@ impl Stats for Card {
 
 pub mod card {
     macro_rules! create_creature_card {
-        ($name:expr, $description:expr, $damage:expr, $defense:expr, $mana:expr) => {
+        ($name:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*]) => {
             Card::new(
                 $name,
                 $description,
@@ -356,11 +414,13 @@ pub mod card {
                     // Action to declare the creature as an attacker in the Declare Attackers phase
                     CardActionTrigger::new(
                         ActionTriggerType::TapWithinPhases(vec![TurnPhase::DeclareAttackers]),
+                        CardRequiredTarget::EnemyCardOrPlayer,
                         Arc::new(DeclareAttackerAction {}),
                     ),
                     // Action to manually declare the creature as a blocker in the Declare Blockers phase
                     CardActionTrigger::new(
                         ActionTriggerType::ManualWithinPhases(vec![], vec![TurnPhase::DeclareBlockers]),
+                        CardRequiredTarget::EnemyCardInCombat,
                         Arc::new(DeclareBlockerAction {}),
                     ),
                 ],
@@ -374,7 +434,7 @@ pub mod card {
                     Stat::new(StatType::Defense, $defense),
                 ],
                 // Specify the mana requirements for the creature card
-                vec![$mana],
+                vec![$($mana),*],
             )
         };
     }

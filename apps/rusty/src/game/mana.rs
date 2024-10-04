@@ -24,7 +24,7 @@ impl ManaType {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Type, Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManaPool {
     pub white: u8,
     pub blue: u8,
@@ -32,6 +32,7 @@ pub struct ManaPool {
     pub red: u8,
     pub green: u8,
     pub colorless: u8,
+    pub played_card: bool,
 }
 
 impl ManaPool {
@@ -43,6 +44,7 @@ impl ManaPool {
             red: 0,
             green: 0,
             colorless: 0,
+            played_card: false,
         }
     }
 
@@ -58,7 +60,9 @@ impl ManaPool {
     }
 
     pub fn empty_pool(&mut self) {
+        let played_card = self.played_card;
         *self = ManaPool::new();
+        self.played_card = played_card;
     }
 
     pub fn format_mana(&self) -> String {

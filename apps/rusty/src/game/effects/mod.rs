@@ -4,11 +4,11 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::{
-    action::CardAction,
-    card::Card,
+    action::{CardAction, CardActionTarget},
+    card::{Card, CardType},
     player::Player,
     stat::{Stat, StatType, Stats},
-    turn::TurnPhase,
+    turn::{Turn, TurnPhase},
     Game,
 };
 
@@ -42,7 +42,7 @@ impl EffectID {
 // Trait for defining different types of effects
 #[async_trait::async_trait]
 pub trait Effect: Send + Sync + Debug {
-    async fn apply(&mut self);
+    async fn apply(&mut self, turn: Turn);
     fn is_expired(&self) -> bool;
     async fn cleanup(&mut self);
     fn get_id(&self) -> &EffectID;
@@ -76,18 +76,38 @@ impl EffectManager {
         self.effects.remove(effect_id);
     }
 
-    pub async fn apply_effects(&mut self) {
+    pub async fn apply_effects(&mut self, turn: Turn) {
         let effect_ids: Vec<EffectID> = self.effects.keys().cloned().collect();
         for effect_id in effect_ids {
             if let Some(effect_arc) = self.effects.clone().get(&effect_id) {
                 let mut effect = effect_arc.lock().await;
-                effect.apply().await;
+                effect.apply(turn.clone()).await;
                 if effect.is_expired() {
+                    println!("cleaning up effect.");
                     effect.cleanup().await;
                     self.effects.remove(&effect_id);
                 }
             }
         }
+    }
+
+    pub async fn has_effects(&self, source_card: &Arc<Mutex<Card>>) -> bool {
+        let effect_entries: Vec<(EffectID, Arc<Mutex<dyn Effect + Send + Sync>>)> = self
+            .effects
+            .iter()
+            .map(|(effect_id, effect_arc)| (effect_id.clone(), Arc::clone(effect_arc)))
+            .collect();
+
+        for (effect_id, effect_arc) in effect_entries {
+            let effect = effect_arc.lock().await;
+            if let Some(effect_source_card) = effect.get_source_card() {
+                if Arc::ptr_eq(effect_source_card, source_card) {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     pub async fn remove_effects_by_source(&mut self, source_card: &Arc<Mutex<Card>>) {
@@ -125,14 +145,21 @@ impl fmt::Debug for EffectManager {
 }
 
 #[derive(Debug)]
+pub enum ExpireContract {
+    Turns(i8),
+    Never,
+}
+
+#[derive(Debug)]
 pub struct StatModifierEffect {
     pub target: EffectTarget,
     pub stat_type: StatType,
     pub amount: i8,
-    pub remaining_turns: Option<u32>, // None for permanent effects
+    pub expires: ExpireContract, // None for permanent effects
     pub id: EffectID,
     pub applied: bool,
     pub source_card: Option<Arc<Mutex<Card>>>,
+    previous_turn: Option<i32>,
 }
 
 impl StatModifierEffect {
@@ -140,7 +167,7 @@ impl StatModifierEffect {
         target: EffectTarget,
         stat_type: StatType,
         amount: i8,
-        remaining_turns: Option<u32>,
+        expires: ExpireContract,
         source_card: Option<Arc<Mutex<Card>>>,
     ) -> StatModifierEffect {
         StatModifierEffect {
@@ -148,9 +175,10 @@ impl StatModifierEffect {
             stat_type,
             source_card,
             amount,
-            remaining_turns,
+            expires,
             id: EffectID::new(),
             applied: false,
+            previous_turn: None,
         }
     }
 }
@@ -160,7 +188,7 @@ impl Effect for StatModifierEffect {
     fn get_source_card(&self) -> Option<&Arc<Mutex<Card>>> {
         self.source_card.as_ref()
     }
-    async fn apply(&mut self) {
+    async fn apply(&mut self, turn: Turn) {
         if !self.applied {
             let id_str = self.id.to_string();
             match &self.target {
@@ -180,16 +208,27 @@ impl Effect for StatModifierEffect {
         }
 
         // Decrement duration if applicable
-        if let Some(remaining) = &mut self.remaining_turns {
-            if *remaining > 0 {
-                *remaining -= 1;
+        match &mut self.expires {
+            ExpireContract::Turns(remaining) => {
+                if let Some(prev) = self.previous_turn {
+                    if prev != turn.turn_number && *remaining > 0 {
+                        *remaining -= 1;
+                        println!("remaining {:?}", remaining);
+                    }
+                } else {
+                    self.previous_turn = Some(turn.turn_number);
+                }
             }
+            _ => {}
         }
     }
 
     fn is_expired(&self) -> bool {
-        self.remaining_turns
-            .map_or(false, |remaining| remaining == 0)
+        // Decrement duration if applicable
+        match &self.expires {
+            ExpireContract::Turns(remaining) => *remaining == 0,
+            _ => false,
+        }
     }
 
     async fn cleanup(&mut self) {
@@ -208,6 +247,124 @@ impl Effect for StatModifierEffect {
 
     fn get_id(&self) -> &EffectID {
         &self.id
+    }
+}
+
+pub struct ApplyEffectToCardBasedOnTotalCardType {
+    pub card_type: CardType,
+    pub effect_generator: Arc<
+        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>, i8) -> Arc<Mutex<dyn Effect + Send + Sync>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToCardBasedOnTotalCardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToCardBasedOnTotalCardType")
+            .finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToCardBasedOnTotalCardType {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
+        let mut total = 0;
+        let owner_arc = {
+            let card = card_arc.lock().await;
+            card.owner.clone()
+        };
+
+        if let Some(owner_arc) = owner_arc {
+            let owner = owner_arc.lock().await;
+
+            for card_in_play in &owner.cards_in_play {
+                let card_type_matches = {
+                    let card = card_in_play.lock().await;
+                    card.card_type == self.card_type
+                };
+
+                if card_type_matches {
+                    total = total + 1;
+                }
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
+
+        println!("Found {} total cards matching {:?}", total, self.card_type);
+
+        if total > 0 {
+            let source_card = Some(Arc::clone(&card_arc));
+            let target = &card_arc.lock().await.attached;
+            if let Some(x) = target {
+                let effect =
+                    (self.effect_generator)(EffectTarget::Card(Arc::clone(x)), source_card, total);
+                let effect_id = {
+                    let effect_lock = effect.lock().await;
+                    effect_lock.get_id().clone()
+                };
+
+                game.effect_manager.add_effect(effect_id, effect);
+            }
+        }
+    }
+}
+
+pub struct ApplyEffectToPlayerCardType {
+    pub card_type: CardType,
+    pub effect_generator: Arc<
+        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToPlayerCardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToPlayerCardType").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToPlayerCardType {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
+        let owner_arc = {
+            let card = card_arc.lock().await;
+            card.owner.clone()
+        };
+
+        if let Some(owner_arc) = owner_arc {
+            let owner = owner_arc.lock().await;
+
+            // Iterate over the owner's in-play cards and apply the effect to matching card types
+            for card_in_play in &owner.cards_in_play {
+                let card_type_matches = {
+                    let card = card_in_play.lock().await;
+                    card.card_type == self.card_type
+                };
+
+                if card_type_matches {
+                    let source_card = Some(Arc::clone(&card_arc));
+                    let effect = (self.effect_generator)(
+                        EffectTarget::Card(Arc::clone(&card_in_play)),
+                        source_card,
+                    );
+                    let effect_id = {
+                        let effect_lock = effect.lock().await;
+                        effect_lock.get_id().clone()
+                    }; // Lock is released here
+
+                    println!("Adding effect {:?} to card {:?}", effect, card_arc);
+
+                    game.effect_manager.add_effect(effect_id, effect);
+                } else {
+                    // println!("Card does not match card type {:?}", self.card_type);
+                }
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
     }
 }
 
@@ -235,15 +392,30 @@ impl CardAction for ApplyEffectToTargetAction {
 
         if let Some(target) = target {
             let source_card = Some(Arc::clone(&card_arc)); // Set the source card
-            let effect = (self.effect_generator)(target, source_card);
+            let effect = (self.effect_generator)(target.clone(), source_card);
             let effect_id = {
                 let effect_lock = effect.lock().await;
                 effect_lock.get_id().clone()
             }; // Lock is released here
+            println!("Adding effect {:?} to card {:?}", effect, target);
 
             game.effect_manager.add_effect(effect_id, effect);
         } else {
             println!("No target specified for card action.");
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct DrawCardCardAction {
+    pub target: CardActionTarget,
+}
+
+#[async_trait::async_trait]
+impl CardAction for DrawCardCardAction {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
+        let card = card_arc.lock().await;
+        let owner = card.owner.as_ref().unwrap();
+        owner.lock().await.draw_card();
     }
 }

@@ -2,10 +2,11 @@ use std::fmt::Debug;
 use std::{collections::HashMap, fmt};
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use ulid::Ulid;
 use uuid::uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Stat {
     pub stat_type: StatType,
     pub intensity: i8,
@@ -17,18 +18,17 @@ pub trait Stats: Debug + Send + Sync {
     fn modify_stat(&mut self, stat_type: StatType, intensity: i8);
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq, Type)]
 pub struct StatManager {
     pub stats: HashMap<String, Stat>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatType {
     Health,
     Damage,
-    Heat,
-    ActionPoints,
     Defense,
+    Trample,
 }
 
 impl Stat {
@@ -55,7 +55,6 @@ impl fmt::Display for StatType {
         let n = &format!("{:?}", self);
         let x = n.as_str();
         let stat_name = match self {
-            StatType::ActionPoints => "Action Points",
             _ => x,
         };
 

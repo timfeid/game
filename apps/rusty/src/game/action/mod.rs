@@ -1,6 +1,8 @@
 pub mod add_stat;
 pub mod generate_mana;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::{
     fmt::{self, Debug},
     sync::Arc,
@@ -9,7 +11,7 @@ use tokio::sync::Mutex;
 use ulid::Ulid;
 
 use super::{
-    card::Card,
+    card::{Card, CardType},
     effects::{Effect, EffectTarget},
     mana::ManaType,
     player::Player,
@@ -67,6 +69,9 @@ impl PlayerActionTrigger {
                     .await
                     && phases.contains(&turn.phase)
             }
+            ActionTriggerType::Sorcery => {
+                turn.phase == TurnPhase::Main || turn.phase == TurnPhase::Main2
+            }
         }
     }
 }
@@ -78,7 +83,134 @@ pub struct ResetCardAction {}
 impl CardAction for ResetCardAction {
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
         let mut card = card.lock().await;
-        card.effect_ids = vec![];
+        card.is_countered = false;
+    }
+}
+
+#[derive(Debug)]
+pub struct PlayCardAction {
+    pub player_arc: Arc<Mutex<Player>>,
+    pub card_arc: Arc<Mutex<Card>>,
+    pub target: Option<EffectTarget>,
+}
+
+impl PlayCardAction {
+    pub fn new(
+        player_arc: Arc<Mutex<Player>>,
+        card_arc: Arc<Mutex<Card>>,
+        target: Option<EffectTarget>,
+    ) -> Self {
+        Self {
+            player_arc,
+            card_arc,
+            target,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CounterSpellAction {}
+
+#[async_trait::async_trait]
+impl CardAction for CounterSpellAction {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
+        // Get the target of the counter spell
+        let target = {
+            let card = card_arc.lock().await;
+            card.target.clone()
+        };
+
+        if let Some(EffectTarget::Card(target_action_arc)) = target {
+            target_action_arc.lock().await.is_countered = true;
+            println!("Countered a spell on the stack.");
+        } else {
+            println!("Target spell is not on the stack.");
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Action for PlayCardAction {
+    async fn apply(&self, game: &mut Game) {
+        println!("play card triggered.");
+        if self.card_arc.lock().await.is_countered {
+            // Move the card to the graveyard
+            {
+                let mut player = self.player_arc.lock().await;
+                player.deck.destroy(Arc::clone(&self.card_arc));
+            }
+            println!(
+                "Spell {} was countered and moved to graveyard.",
+                self.card_arc.lock().await.name
+            );
+        } else {
+            // Move the card to the battlefield
+            {
+                let mut player = self.player_arc.lock().await;
+                player.cards_in_play.push(Arc::clone(&self.card_arc));
+            }
+
+            // Set the target and owner on the card
+            {
+                let mut card_lock = self.card_arc.lock().await;
+                card_lock.target = self.target.clone();
+                card_lock.action_target = self.target.clone();
+                card_lock.owner = Some(self.player_arc.clone());
+            }
+
+            // Collect and execute any immediate actions
+            let mut actions = {
+                let card_lock = self.card_arc.lock().await;
+                card_lock.collect_phase_based_actions_sync(
+                    &game.current_turn.clone().unwrap(),
+                    ActionTriggerType::Instant,
+                    &self.card_arc,
+                )
+            };
+
+            game.execute_actions(&mut actions).await;
+
+            // Handle special cases, e.g., if the card is a land
+            {
+                let card_lock = self.card_arc.lock().await;
+                if let CardType::BasicLand(_) = card_lock.card_type {
+                    let mut player = self.player_arc.lock().await;
+                    player.mana_pool.played_card = true;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReturnToHandAction {}
+
+#[async_trait::async_trait]
+impl CardAction for ReturnToHandAction {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
+        let target = {
+            let card = card_arc.lock().await;
+            card.target.clone()
+        };
+
+        if let Some(EffectTarget::Card(target_card_arc)) = target {
+            let owner_arc = {
+                let target_card = target_card_arc.lock().await;
+                target_card.owner.clone()
+            };
+
+            if let Some(owner_arc) = owner_arc {
+                let mut owner = owner_arc.lock().await;
+                owner.return_card_to_hand(&target_card_arc).await;
+                println!(
+                    "Returned {} to {}'s hand.",
+                    target_card_arc.lock().await.name,
+                    owner.name
+                );
+            }
+        } else {
+            println!("No valid target for ReturnToHandAction.");
+        }
     }
 }
 
@@ -86,12 +218,18 @@ impl CardAction for ResetCardAction {
 pub struct CardActionTrigger {
     pub trigger_type: ActionTriggerType,
     pub action: Arc<dyn CardAction + Send + Sync>,
+    pub card_required_target: CardRequiredTarget,
 }
 
 impl CardActionTrigger {
-    pub fn new(trigger_type: ActionTriggerType, action: Arc<dyn CardAction + Send + Sync>) -> Self {
+    pub fn new(
+        trigger_type: ActionTriggerType,
+        card_required_target: CardRequiredTarget,
+        action: Arc<dyn CardAction + Send + Sync>,
+    ) -> Self {
         Self {
             trigger_type,
+            card_required_target,
             action,
         }
     }
@@ -102,6 +240,9 @@ impl CardActionTrigger {
                 self.action.apply(game, card).await;
             }
             ActionTriggerType::Attached => {
+                self.action.apply(game, card).await;
+            }
+            ActionTriggerType::Instant => {
                 self.action.apply(game, card).await;
             }
             x => {
@@ -118,7 +259,21 @@ pub enum TriggerTarget {
     Any,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub enum CardRequiredTarget {
+    None,
+    OwnedCard,
+    AnyPlayer,
+    AnyCard,
+    EnemyCard,
+    EnemyPlayer,
+    EnemyCardOrPlayer,
+    CardOfType(CardType),
+    EnemyCardInCombat,
+    Spell,
+    MultipleCardsOfType(CardType, i8),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub enum CardActionTarget {
     SelfCard,
     SelfOwner,
@@ -152,6 +307,7 @@ pub enum ActionTriggerType {
     Attached,
     Detached,
     OnCardDestroyed,
+    Sorcery,
 }
 
 #[async_trait::async_trait]
@@ -216,16 +372,31 @@ pub struct ApplyStat {
 }
 
 #[derive(Debug, Clone)]
+pub struct ResetManaPoolAction {}
+
+#[async_trait]
+impl PlayerAction for ResetManaPoolAction {
+    async fn apply(&self, game: &mut Game, player_index: usize) {
+        let mut player = game.players[player_index].lock().await;
+        println!("reseting mana pool.");
+
+        player.mana_pool.empty_pool();
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct UntapAllAction {}
 
 #[async_trait]
 impl PlayerAction for UntapAllAction {
     async fn apply(&self, game: &mut Game, player_index: usize) {
-        let player = game.players[player_index].lock().await;
+        let mut player = game.players[player_index].lock().await;
 
         for card in player.cards_in_play.iter() {
             card.lock().await.untap();
         }
+        println!("untap all.");
+        player.mana_pool.played_card = false;
     }
 }
 
@@ -359,7 +530,10 @@ pub struct CombatAction {}
 #[async_trait::async_trait]
 impl PlayerAction for CombatAction {
     async fn apply(&self, game: &mut Game, player_index: usize) {
-        game.combat.resolve_combat().await;
+        let destroyed_cards = game.combat.resolve_combat().await;
+        for card in destroyed_cards {
+            game.destroy_card(&card).await;
+        }
         game.handle_deaths().await;
     }
 }

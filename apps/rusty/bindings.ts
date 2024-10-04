@@ -6,18 +6,68 @@ export type Procedures = {
     mutations: 
         { key: "authentication.login", input: LoginArgs, result: AuthResponse } | 
         { key: "authentication.refresh_token", input: string, result: AuthResponse } | 
-        { key: "lobby.chat", input: LobbyChatArgs, result: boolean } | 
-        { key: "lobby.create", input: string[], result: LobbyData },
+        { key: "lobby.action_card", input: ActionCardArgs, result: null } | 
+        { key: "lobby.attach_card", input: ActionCardArgs, result: null } | 
+        { key: "lobby.chat", input: LobbyChatArgs, result: null } | 
+        { key: "lobby.create", input: string[], result: LobbyData } | 
+        { key: "lobby.join", input: string, result: null } | 
+        { key: "lobby.play_card", input: PlayCardArgs, result: null } | 
+        { key: "lobby.ready", input: string, result: null } | 
+        { key: "lobby.turn", input: string, result: null },
     subscriptions: 
         { key: "lobby.subscribe", input: [string, string], result: LobbyData }
 };
 
-export type LobbyData = { join_code: string; chat: LobbyChat[] }
+export type PlayCardArgs = { code: string; in_hand_index: number; target: ActionCardTarget | null }
+
+export type GameState = { players: { [key: string]: PlayerState }; public_info: PublicGameInfo; status: GameStatus }
+
+export type ManaType = "White" | "Blue" | "Black" | "Red" | "Green" | "Colorless"
+
+export type TurnPhase = "Untap" | "Upkeep" | "Draw" | "Main" | "BeginningOfCombat" | "DeclareAttackers" | "DeclareBlockers" | "CombatDamage" | "EndOfCombat" | "Main2" | "End" | "Cleanup"
+
+export type LobbyData = { join_code: string; chat: LobbyChat[]; game_state: GameState }
+
+export type CardType = "Creature" | "Enchantment" | "Instant" | "Sorcery" | "Artifact" | { BasicLand: ManaType } | { Land: ManaType[] }
+
+export type CardWithDetails = { card: Card; required_target: CardRequiredTarget; action_type: ActionType }
+
+export type ActionCardArgs = { code: string; player_index: number; in_play_index: number; target: ActionCardTarget | null }
+
+export type GameStatus = "NeedsPlayers" | "InGame" | { WaitingForStart: number }
+
+export type PublicGameInfo = { current_turn: Turn | null }
+
+export type ActionType = "Tap" | "None" | "Instant" | "Attach"
+
+export type StatType = "Health" | "Damage" | "Defense" | "Trample"
+
+export type Turn = { current_player_index: number; phase: TurnPhase; turn_number: number }
 
 export type LobbyChatArgs = { lobby_id: string; text: string }
 
 export type LobbyChat = { user_id: string; message: string }
 
+export type ManaPool = { white: number; blue: number; black: number; red: number; green: number; colorless: number; played_card: boolean }
+
+export type PlayerStatus = "Spectator" | "Ready" | "InGame"
+
+export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number }
+
 export type LoginArgs = { username: string; password: string }
 
+export type Card = { name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; stats: StatManager; cost: ManaType[]; is_countered: boolean }
+
 export type AuthResponse = { access_token: string | null; refresh_token: string | null; success: boolean }
+
+export type CardRequiredTarget = "None" | "OwnedCard" | "AnyPlayer" | "AnyCard" | "EnemyCard" | "EnemyPlayer" | "EnemyCardOrPlayer" | { CardOfType: CardType } | "EnemyCardInCombat" | "Spell" | { MultipleCardsOfType: [CardType, number] }
+
+export type Stat = { stat_type: StatType; intensity: number }
+
+export type PlayerState = { public_info: PublicPlayerInfo; hand: CardWithDetails[]; discard_pile: CardWithDetails[]; status: PlayerStatus; is_leader: boolean; player_index: number }
+
+export type ActionCardTarget = { Player: number } | { CardInPlay: [number, number] }
+
+export type CardPhase = { Charging: number } | "Ready" | "Complete" | "Cancelled"
+
+export type StatManager = { stats: { [key: string]: Stat } }

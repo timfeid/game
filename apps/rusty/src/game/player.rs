@@ -5,13 +5,14 @@ use std::{
     fmt,
     rc::Rc,
     sync::Arc,
+    time::Duration,
 };
 
 use axum::response::sse::KeepAlive;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use textwrap::fill;
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, time::sleep};
 
 use crate::{
     error::{AppError, AppResult},
@@ -26,8 +27,8 @@ use crate::{
 use super::{
     action::{
         Action, ActionTriggerType, Attachable, CardActionTrigger, CardActionWrapper, CombatAction,
-        DrawCardAction, PlayerAction, PlayerActionTarget, PlayerActionTrigger, PlayerActionWrapper,
-        TriggerTarget, UntapAllAction,
+        DrawCardAction, PlayCardAction, PlayerAction, PlayerActionTarget, PlayerActionTrigger,
+        PlayerActionWrapper, ResetManaPoolAction, TriggerTarget, UntapAllAction,
     },
     card::{Card, CardPhase},
     deck::Deck,
@@ -79,6 +80,8 @@ pub struct Player {
     pub effect_ids: Vec<EffectID>, // IDs of effects applied to this card
     #[serde(skip_serializing, skip_deserializing)]
     pub game: Option<Arc<Mutex<Game>>>, // Add this field
+    #[serde(skip_serializing, skip_deserializing)]
+    pub spells: Vec<Arc<Mutex<Card>>>,
 }
 
 impl fmt::Display for Player {
@@ -89,22 +92,45 @@ impl fmt::Display for Player {
 }
 
 impl Player {
+    pub fn reset_spells(&mut self) {
+        self.spells = vec![];
+        println!("reset spells");
+    }
+
     pub fn new(name: &str, health: i8, action_points: i8, deck: Vec<Card>) -> Self {
         let mut player = Self {
             name: name.to_string(),
-            stat_manager: StatManager::new(vec![
-                Stat::new(StatType::Health, health),
-                Stat::new(StatType::ActionPoints, action_points),
-            ]),
+            stat_manager: StatManager::new(vec![Stat::new(StatType::Health, health)]),
             is_alive: true,
             cards_in_hand: vec![],
             cards_in_play: vec![],
             game: None,
             deck: Deck::new(deck),
+            spells: vec![],
             triggers: vec![
                 PlayerActionTrigger::new(
                     ActionTriggerType::PhaseBased(vec![TurnPhase::Untap], TriggerTarget::Owner),
                     Arc::new(UntapAllAction {}),
+                ),
+                PlayerActionTrigger::new(
+                    ActionTriggerType::PhaseBased(
+                        vec![
+                            TurnPhase::Untap,
+                            TurnPhase::Upkeep,
+                            TurnPhase::Draw,
+                            TurnPhase::Main,
+                            TurnPhase::BeginningOfCombat,
+                            TurnPhase::DeclareAttackers,
+                            TurnPhase::DeclareBlockers,
+                            TurnPhase::CombatDamage,
+                            TurnPhase::EndOfCombat,
+                            TurnPhase::Main2,
+                            TurnPhase::End,
+                            TurnPhase::Cleanup,
+                        ],
+                        TriggerTarget::Owner,
+                    ),
+                    Arc::new(ResetManaPoolAction {}),
                 ),
                 PlayerActionTrigger::new(
                     ActionTriggerType::PhaseBased(vec![TurnPhase::Draw], TriggerTarget::Owner),
@@ -126,6 +152,18 @@ impl Player {
         };
 
         player
+    }
+
+    pub fn set_deck(&mut self, card: Vec<Card>) {}
+
+    pub async fn return_card_to_hand(&mut self, card_arc: &Arc<Mutex<Card>>) {
+        self.cards_in_play.retain(|c| !Arc::ptr_eq(c, card_arc));
+        self.cards_in_hand.push(Arc::clone(card_arc));
+    }
+
+    pub async fn remove_card_from_play(&mut self, card_arc: Arc<Mutex<Card>>) {
+        self.cards_in_play.retain(|c| !Arc::ptr_eq(c, &card_arc));
+        self.deck.destroy(card_arc);
     }
 
     pub async fn detach_card_in_play(
@@ -292,36 +330,87 @@ impl Player {
         }
     }
 
-    pub async fn choose_action(&self, game: &Game) -> Option<Arc<dyn Action + Send + Sync>> {
-        // Collect available actions
-        let available_actions = self.collect_available_actions(game).await;
+    pub async fn priority_turn_start(&self) {
+        println!("{}'s priority turn starts.", self.name);
+    }
 
-        // For testing, let's assume the player always passes if they have no actions
-        if available_actions.is_empty() {
-            println!(
-                "{} has no available actions and passes priority.",
-                self.name
-            );
-            None // Player passes
-        } else {
-            // For the active player, you might want to simulate them taking an action or passing
-            // For now, we'll simulate passing to avoid hanging
-            println!("{} chooses to pass priority.", self.name);
-            None // Player passes
-        }
+    pub async fn priority_turn_end(&self) {
+        println!("{}'s priority turn ends.", self.name);
+    }
+
+    // pub async fn choose_action(&self, game: &Game) -> Option<Arc<dyn Action + Send + Sync>> {
+    // let mut attempts = 0;
+    // let max_attempts = time_limit as usize; // We will check once per second for 'time_limit' seconds
+
+    // loop {
+    //     sleep(Duration::from_secs(1)).await; // Wait for 1 second
+    //     attempts += 1;
+
+    //     // Collect available actions after each 1 second interval
+    //     let available_actions = self.collect_available_actions(game).await;
+
+    //     if !available_actions.is_empty() {
+    //         // Simulate player choosing to take action or pass
+    //         println!("{} takes an action.", self.name);
+    //         return Some(available_actions[0].clone()); // For testing, return the first available action
+    //     }
+
+    //     if attempts >= max_attempts {
+    //         // If we've waited long enough, assume the player passes
+    //         println!(
+    //             "{} did not take an action in time and passes priority after {} seconds.",
+    //             self.name, time_limit
+    //         );
+    //         return None; // Player passes
+    //     }
+
+    //     println!(
+    //         "{} is still thinking. {} seconds remaining.",
+    //         self.name,
+    //         time_limit - attempts as u64
+    //     );
+    // }
+    // }
+
+    pub async fn attach_card(
+        &mut self,
+        in_play_index: usize,
+        target: Option<EffectTarget>,
+        game: &mut Game,
+    ) -> Result<Vec<Arc<dyn Action + Send + Sync>>, String> {
+        let actions = {
+            let card = &self.cards_in_play[in_play_index];
+            // let card = card.clone();
+            let mut card_l = card.lock().await;
+
+            if let Some(EffectTarget::Card(_card)) = &target {
+                if Arc::ptr_eq(_card, card) {
+                    return Err("Cannot attach to self".to_string());
+                }
+                println!("attaching {} to {:?}", card_l.name, _card);
+                // _card.lock().await.attached = Some(Arc::clone(card));
+            }
+            // card_l.attached =
+            card_l.action_target = target.clone();
+            card_l.target = target.clone();
+
+            card_l.collect_attach_actions(Arc::clone(&card)).await
+        };
+
+        Ok(actions)
     }
 
     pub async fn execute_action(
         &mut self,
-        index: usize,
+        in_play_index: usize,
         target: Option<EffectTarget>,
         game: &mut Game,
     ) -> Result<Vec<Arc<dyn Action + Send + Sync>>, String> {
-        let mut actions = {
-            let card = &self.cards_in_play[index];
-            let card = card.clone();
+        let (actions, requires_tap) = {
+            let card = Arc::clone(&self.cards_in_play[in_play_index]);
             let mut card_l = card.lock().await;
-            card_l.action_target = target;
+            card_l.action_target = target.clone();
+
             card_l
                 .collect_manual_actions(
                     Arc::clone(&card),
@@ -329,9 +418,14 @@ impl Player {
                 )
                 .await
         };
-        println!("{:?}", actions);
 
-        Ok(actions)
+        if requires_tap {
+            self.tap_card(in_play_index, target, game).await
+        } else {
+            println!("{:?}", actions);
+
+            Ok(actions)
+        }
     }
 
     pub async fn tap_card(
@@ -353,80 +447,70 @@ impl Player {
         // )
         // .await;
 
-        let mut actions = card_l
+        let response = card_l
             .collect_manual_actions(Arc::clone(card), game.current_turn.as_ref().unwrap().phase)
             .await;
 
-        Ok(actions)
+        Ok(response.0)
     }
 
     pub async fn play_card(
         player_arc: &Arc<Mutex<Player>>,
         index: usize,
         target: Option<EffectTarget>,
-        game: &Game,
-    ) -> Result<Vec<Arc<dyn Action + Send + Sync>>, String> {
+        current_turn: Turn,
+    ) -> Result<Arc<dyn Action + Send + Sync>, String> {
         // Lock the player to mutate state
-        let (card, can_cast, name) = {
+        let card_arc = {
             let mut player = player_arc.lock().await;
-            let card = player.cards_in_hand.remove(index);
-            let can_cast = player.can_cast(&card).await;
+            let card = player
+                .cards_in_hand
+                .get(index)
+                .ok_or("Invalid card index")?
+                .clone();
+
+            let can_pay_to_cast = player.can_pay_cost(&card).await;
+            let can_play = player
+                .can_play(&card, Arc::ptr_eq(&current_turn.current_player, player_arc))
+                .await;
             let name = player.name.clone();
-            (card, can_cast, name)
+
+            if !can_play {
+                return Err(format!(
+                    "You cannot cast {} right now for {}",
+                    card.lock().await.name,
+                    name
+                ));
+            }
+
+            if !can_pay_to_cast {
+                return Err(format!(
+                    "Not enough mana to cast card {} for {}",
+                    card.lock().await.name,
+                    name
+                ));
+            }
+
+            // Remove the card from hand
+            player.cards_in_hand.remove(index);
+
+            player.spells.push(card.clone());
+            println!("Added to spells list");
+
+            // Pay mana
+            player.pay_mana_for_card(&card).await;
+
+            card
         }; // Lock is released here
 
-        if !can_cast {
-            // Need to lock again to insert the card back
-            let mut player = player_arc.lock().await;
-            player.cards_in_hand.insert(index, Arc::clone(&card)); // Put the card back in hand
-            return Err(format!(
-                "Not enough mana to cast card {} for {}",
-                card.lock().await.name,
-                name
-            ));
-        }
+        // Create the action
+        let action = Arc::new(PlayCardAction::new(
+            player_arc.clone(),
+            card_arc.clone(),
+            target,
+        ));
 
-        // Pay mana
-        {
-            let mut player = player_arc.lock().await;
-            player.pay_mana_for_card(&card).await;
-        } // Lock is released here
-
-        // Set target and owner
-        {
-            let mut card_lock = card.lock().await;
-            card_lock.target = target;
-            card_lock.owner = Some(player_arc.clone());
-        } // Lock is released here
-
-        // Add card to cards_in_play
-        {
-            let mut player = player_arc.lock().await;
-            player.cards_in_play.push(Arc::clone(&card));
-        } // Lock is released here
-
-        // Collect actions without holding any locks
-        let mut actions = {
-            let card_lock = card.lock().await;
-            card_lock.collect_phase_based_actions_sync(
-                &game.current_turn.clone().unwrap(),
-                ActionTriggerType::Instant,
-                &card,
-            )
-        };
-
-        // Additional logic
-        {
-            let card_lock = card.lock().await;
-            if card_lock.card_type == CardType::Instant {
-                actions.push(Arc::new(CardActionWrapper {
-                    action: Arc::new(DestroySelfAction {}),
-                    card: Arc::clone(&card),
-                }));
-            }
-        } // Lock is released here
-
-        Ok(actions)
+        Ok(action)
     }
 
     pub fn draw_card(&mut self) {
@@ -454,10 +538,10 @@ impl Player {
 
     pub async fn collect_available_actions(
         &self,
-        game: &Game,
+        turn: Turn,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions = Vec::new();
-        let turn_phase = game.current_turn.as_ref().unwrap().phase;
+        let turn_phase = turn.phase;
 
         // Collect manual actions from cards in play
         for card_arc in &self.cards_in_play {
@@ -465,7 +549,7 @@ impl Player {
             let mut card_actions = card
                 .collect_manual_actions(Arc::clone(card_arc), turn_phase)
                 .await;
-            actions.append(&mut card_actions);
+            actions.append(&mut card_actions.0);
         }
 
         // Add other player actions if needed
@@ -595,7 +679,7 @@ impl Player {
     }
 
     pub(crate) fn from_claims(user: &crate::services::jwt::Claims) -> Player {
-        Player::new(&user.sub, 100, 10, vec![])
+        Player::new(&user.sub, 20, 10, vec![])
     }
 
     pub async fn empty_mana_pool(&mut self) {
@@ -621,7 +705,17 @@ impl Player {
             && self.mana_pool.colorless >= required_mana.colorless
     }
 
-    pub async fn can_cast(&self, card: &Arc<Mutex<Card>>) -> bool {
+    pub async fn can_play(&self, card: &Arc<Mutex<Card>>, is_my_turn: bool) -> bool {
+        let card = card.lock().await;
+
+        if let CardType::BasicLand(mana) = card.card_type {
+            self.mana_pool.played_card == false && is_my_turn
+        } else {
+            true
+        }
+    }
+
+    pub async fn can_pay_cost(&self, card: &Arc<Mutex<Card>>) -> bool {
         let card = card.lock().await;
 
         self.has_required_mana(&card.cost).await
