@@ -42,8 +42,51 @@ pub struct Lobby {
 
 impl Lobby {
     pub async fn get_state(&self) -> PublicGameInfo {
+        let priority_queue = {
+            let cloned_game = self.cloned_game().await;
+            let game = cloned_game.read().await;
+            if let Some((player, time_left, _)) = &game.current_priority_player {
+                Some(PriorityQueue {
+                    player_index: self
+                        .data
+                        .game_state
+                        .players
+                        .values()
+                        .find(|x| Arc::ptr_eq(&x.player, player))
+                        .unwrap()
+                        .player_index,
+                    time_left: time_left.clone(),
+                })
+            } else {
+                None
+            }
+        };
+
+        let attacking_cards = {
+            let mut attacking_cards = vec![];
+            let cloned_game = self.cloned_game().await;
+            let game = cloned_game.read().await;
+            let turn = game.current_turn.clone().unwrap();
+            let player = turn.current_player;
+            for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
+                for (attacker, _) in game.combat.attackers.iter() {
+                    if Arc::ptr_eq(attacker, card) {
+                        attacking_cards.push(FrontendCardTarget {
+                            player_index: turn.current_player_index,
+                            pile: FrontendPileName::Play,
+                            card_index: index as i32,
+                        });
+                    }
+                }
+            }
+
+            attacking_cards
+        };
+
         PublicGameInfo {
             current_turn: self.game.read().await.current_turn.clone(),
+            priority_queue,
+            attacking_cards,
         }
     }
 
@@ -59,11 +102,18 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_stream::wrappers::ReceiverStream;
 use ulid::Ulid;
 
+#[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub enum DeckSelector {
+    Green,
+    Blue,
+}
+
 use crate::{
     error::{AppError, AppResult},
     game::{
-        deck::Deck, effects::EffectTarget, player::Player, Game, GameState, GameStatus,
-        PlayerState, PlayerStatus, PublicGameInfo,
+        deck::Deck, effects::EffectTarget, player::Player, CardWithDetails, FrontendCardTarget,
+        FrontendPileName, FrontendTarget, Game, GameState, GameStatus, PlayerState, PlayerStatus,
+        PriorityQueue, PublicGameInfo,
     },
     services::jwt::Claims,
 };
@@ -116,11 +166,22 @@ impl Lobby {
         self
     }
 
+    pub async fn select_deck(&mut self, user: &Claims, deck: DeckSelector) -> &mut Self {
+        if let Some(player) = self.data.game_state.players.get_mut(&user.sub) {
+            player.deck = deck;
+        }
+
+        self
+    }
+
     pub async fn ready(&mut self, user: &Claims) -> &mut Self {
         if let Some(player) = self.data.game_state.players.get_mut(&user.sub) {
             player.status = PlayerStatus::Ready;
             let mut p = player.player.lock().await;
-            let deck = Deck::new(Deck::create_green_deck());
+            let deck = Deck::new(match player.deck {
+                DeckSelector::Green => Deck::create_green_deck(),
+                DeckSelector::Blue => Deck::create_blue_deck(),
+            });
             deck.set_owner(&player.player).await;
 
             p.deck = deck;

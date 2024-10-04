@@ -15,6 +15,7 @@ use crate::error::AppError;
 use crate::http::controllers::lobby::ActionCardArgs;
 use crate::http::controllers::lobby::LobbyChatArgs;
 use crate::http::controllers::lobby::PlayCardArgs;
+use crate::http::controllers::lobby::SelectDeckArgs;
 use crate::services::jwt::JwtService;
 use crate::{http::controllers::lobby::LobbyController, lobby::lobby::LobbyData, Ctx};
 
@@ -45,6 +46,11 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         })
         .mutation("join", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::join(ctx, code).await?) })
+        })
+        .mutation("select_deck", |t| {
+            t(|ctx, args: SelectDeckArgs| async move {
+                Ok(LobbyController::select_deck(ctx, args).await?)
+            })
         })
         .mutation("ready", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::ready(ctx, code).await?) })

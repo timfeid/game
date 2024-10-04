@@ -1,75 +1,94 @@
-import type { ActionCardTarget, CardWithDetails, GameState } from '@gangsta/rusty';
+import type {
+	CardWithDetails,
+	FrontendCardTarget,
+	FrontendTarget,
+	GameState
+} from '@gangsta/rusty';
 import { toast } from 'svelte-sonner';
 import { writable } from 'svelte/store';
-import type { EffectTarget } from './type';
 
-export const target = writable<EffectTarget | undefined>();
+export const target = writable<FrontendTarget | undefined>();
 export const searchingForTarget = writable(false);
 
-async function search(card: CardWithDetails, game: GameState): Promise<undefined | EffectTarget> {
-	if (card.required_target === 'EnemyCardOrPlayer') {
-		toast.info('Please select your target');
+function isCard(card: unknown): card is FrontendCardTarget {
+	return (card as any) !== undefined;
+}
 
-		if (target) {
-			try {
-				return await new Promise((resolve, reject) => {
-					target.subscribe((e) => {
-						console.log(e);
-						if (e) {
-							if (e.name === 'player') {
+async function search(card: CardWithDetails, game: GameState): Promise<undefined | FrontendTarget> {
+	return await new Promise((resolve, reject) => {
+		toast.info('Please select your target');
+		target.subscribe((e) => {
+			if (e) {
+				const c = (e as any).Card;
+				const p = (e as any).Player;
+
+				if (isCard(c)) {
+					const targetPlayer = Object.values(game.players).find(
+						(p) => p.player_index == c.player_index
+					);
+					let pile;
+					if (c.pile === 'Spell') {
+						pile = targetPlayer!.public_info.spells;
+					} else if (c.pile === 'Hand') {
+						// pile = targetPlayer!.public_info.
+						console.log(
+							'cannot read hand ?, still should return a e.target if were in a good required_target'
+						);
+					} else if (c.pile === 'Play') {
+						pile = targetPlayer!.public_info.cards_in_play;
+					}
+					console.log(card, c);
+					if (card.required_target === 'Spell' && c.pile === 'Spell') {
+						return resolve(e);
+						// for (const )
+						// if (
+						// 	game.
+						// ) {
+						// 	return resolve(e);
+						// }
+					}
+					if (card.required_target === 'EnemyCardInCombat') {
+						if (
+							game.public_info.attacking_cards.find((x) => {
+								return (
+									x.pile === c.pile &&
+									x.card_index === c.card_index &&
+									x.player_index === c.player_index
+								);
+							})
+						) {
+							return resolve(e);
+						}
+					}
+
+					if (pile) {
+						const ccard = pile[c.card_index];
+						if ((card.required_target as any).CardOfType) {
+							// if ((c. as any).CardOfType);
+							if (ccard.card.card_type === (card.required_target as any).CardOfType) {
 								return resolve(e);
 							}
-							reject('Invalid target, looking for ' + card.required_target);
 						}
-					});
-				});
-			} catch (e) {
-				toast.error((e as Error).message);
+					}
+				}
+				if (Number.isInteger(p)) {
+					console.log("it's a player,", p);
+					if (card.required_target === 'EnemyCardOrPlayer') {
+						return resolve(e);
+					}
+				}
+
+				reject('hi looking for' + JSON.stringify(card.required_target));
 			}
-		}
-
-		return undefined;
-	}
-
-	if (typeof card.required_target !== 'string') {
-		const lookingFor = card.required_target.CardOfType;
-		toast.info('Please select your target: ' + lookingFor);
-
-		if (target) {
-			try {
-				return new Promise((resolve, reject) => {
-					target.subscribe((e) => {
-						console.log(e);
-						if (e) {
-							if (e.name === 'card') {
-								const targetPlayer = Object.values(game.players).find(
-									(p) => p.player_index == e.player_index
-								);
-								if (targetPlayer) {
-									const card = targetPlayer.public_info.cards_in_play[e.card_index];
-									if (card.card.card_type === lookingFor) {
-										return resolve(e);
-									}
-								}
-							}
-							reject('Invalid target, looking for ' + card.required_target);
-						}
-					});
-				});
-			} catch (e) {
-				toast.error((e as Error).message);
-			}
-		}
-
-		return;
-	}
+		});
+	});
 }
 
 export async function waitForTarget(
 	card: CardWithDetails,
 	game: GameState,
 	forPlay = false
-): Promise<undefined | EffectTarget> {
+): Promise<undefined | FrontendTarget> {
 	console.log(card);
 	if (card.required_target === 'None' || card.action_type === 'None') {
 		return undefined;
@@ -85,13 +104,4 @@ export async function waitForTarget(
 	target.set(undefined);
 
 	return response;
-}
-
-export function convertEffectTarget(target: EffectTarget): ActionCardTarget {
-	if (target.name === 'player') {
-		return { Player: target.index };
-	}
-	// if (target.name === 'card') {
-	return { CardInPlay: [target.player_index, target.card_index] };
-	// }
 }

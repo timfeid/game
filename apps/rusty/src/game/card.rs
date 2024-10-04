@@ -39,6 +39,16 @@ pub enum CardType {
     Land(Vec<ManaType>),
 }
 
+impl CardType {
+    pub fn is_spell(&self) -> bool {
+        match self {
+            CardType::BasicLand(_) => false,
+            CardType::Land(_) => false,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
 pub enum CardPhase {
     Charging(u8),

@@ -17,8 +17,8 @@ use super::lobby::{Lobby, LobbyData};
 use crate::error::{AppError, AppResult};
 use crate::game::effects::EffectTarget;
 use crate::game::stat::Stats;
-use crate::game::{CardWithDetails, Game, GameStatus, PlayerStatus};
-use crate::http::controllers::lobby::{ActionCardArgs, ActionCardTarget, PlayCardArgs};
+use crate::game::{CardWithDetails, FrontendTarget, Game, GameStatus, PlayerStatus};
+use crate::http::controllers::lobby::{ActionCardArgs, PlayCardArgs};
 use crate::services::jwt::{Claims, JwtService};
 
 #[derive(Clone)]
@@ -36,11 +36,36 @@ impl std::fmt::Debug for LobbyManager {
 }
 
 impl LobbyManager {
-    pub async fn create_lobby(&self, user: &Claims) -> AppResult<String> {
+    pub async fn create_lobby(self: &Arc<Self>, user: &Claims) -> AppResult<String> {
         let mut lobbies = self.lobbies.lock().await;
         let lobby = Lobby::new(user).await;
         let lobby_id = lobby.data.join_code.clone();
+        let lobby_manager_weak = Arc::downgrade(self);
+        let lobby_id_clone = lobby_id.clone();
+        let game_arc_clone = lobby.cloned_game().await;
+
         lobbies.insert(lobby_id.clone(), Arc::new(Mutex::new(lobby)));
+
+        tokio::spawn(async move {
+            let rx = {
+                let game = game_arc_clone.read().await;
+                game.turn_change_sender
+                    .as_ref()
+                    .map(|sender| sender.subscribe())
+            };
+
+            if let Some(mut rx) = rx {
+                while let Ok(_) = rx.recv().await {
+                    if let Some(lobby_manager) = lobby_manager_weak.upgrade() {
+                        // Use `lobby_manager` to notify the lobby
+                        lobby_manager.notify_lobby(&lobby_id_clone).await.ok();
+                    } else {
+                        // The LobbyManager has been dropped; exit the task
+                        break;
+                    }
+                }
+            }
+        });
 
         Ok(lobby_id)
     }
@@ -131,28 +156,44 @@ impl LobbyManager {
     }
 
     pub async fn convert(
-        target: Option<ActionCardTarget>,
+        target: Option<FrontendTarget>,
         lobby: &Arc<Mutex<Lobby>>,
     ) -> Option<EffectTarget> {
         match target {
             Some(target) => match target {
-                crate::http::controllers::lobby::ActionCardTarget::Player(player_index) => {
-                    Some(EffectTarget::Player(Arc::clone(
-                        &lobby.lock().await.cloned_game().await.read().await.players
-                            [player_index as usize],
-                    )))
-                }
-                crate::http::controllers::lobby::ActionCardTarget::CardInPlay(
-                    player_index,
-                    card_index,
-                ) => {
-                    let player = Arc::clone(
-                        &lobby.lock().await.cloned_game().await.read().await.players
-                            [player_index as usize],
-                    );
-                    let card = &player.lock().await.cards_in_play[card_index as usize];
-                    Some(EffectTarget::Card(Arc::clone(&card)))
-                }
+                FrontendTarget::Card(frontend_card_target) => match frontend_card_target.pile {
+                    crate::game::FrontendPileName::Hand => {
+                        let player = Arc::clone(
+                            &lobby.lock().await.cloned_game().await.read().await.players
+                                [frontend_card_target.player_index as usize],
+                        );
+                        let card = &player.lock().await.cards_in_hand
+                            [frontend_card_target.card_index as usize];
+                        Some(EffectTarget::Card(Arc::clone(&card)))
+                    }
+                    crate::game::FrontendPileName::Play => {
+                        let player = Arc::clone(
+                            &lobby.lock().await.cloned_game().await.read().await.players
+                                [frontend_card_target.player_index as usize],
+                        );
+                        let card = &player.lock().await.cards_in_play
+                            [frontend_card_target.card_index as usize];
+                        Some(EffectTarget::Card(Arc::clone(&card)))
+                    }
+                    crate::game::FrontendPileName::Spell => {
+                        let player = Arc::clone(
+                            &lobby.lock().await.cloned_game().await.read().await.players
+                                [frontend_card_target.player_index as usize],
+                        );
+                        let card =
+                            &player.lock().await.spells[frontend_card_target.card_index as usize];
+                        Some(EffectTarget::Card(Arc::clone(&card)))
+                    }
+                },
+                FrontendTarget::Player(player_index) => Some(EffectTarget::Player(Arc::clone(
+                    &lobby.lock().await.cloned_game().await.read().await.players
+                        [player_index as usize],
+                ))),
             },
             None => None,
         }
@@ -241,9 +282,12 @@ impl LobbyManager {
     pub async fn play_card(&self, args: PlayCardArgs, user: &Claims) -> AppResult<()> {
         let lobby_id = args.code.clone();
         let lobby_arc = self.get_lobby(&lobby_id).await?;
-        let player_arc = {
+        let (player_arc, card_arc) = {
             let lobby = lobby_arc.lock().await;
-            Arc::clone(&lobby.data.game_state.players.get(&user.sub).unwrap().player)
+            let player = Arc::clone(&lobby.data.game_state.players.get(&user.sub).unwrap().player);
+            let card =
+                player.clone().lock().await.cards_in_hand[args.in_hand_index as usize].clone();
+            (player, card)
         };
         let target = Self::convert(args.target, &lobby_arc).await;
         let game_arc = {
@@ -262,29 +306,7 @@ impl LobbyManager {
 
         let ga = Arc::clone(&game_arc);
         tokio::spawn(async move {
-            // Acquire the turn_change_sender and subscribe without holding the lock over .await
-            let rx = {
-                let game = ga.read().await;
-                game.turn_change_sender
-                    .as_ref()
-                    .map(|sender| sender.subscribe())
-            };
-
-            if let Some(mut rx) = rx {
-                // Read lock is released here
-                // Wait for messages without holding any locks
-                while let Ok(_) = rx.recv().await {
-                    println!("Received notification from game.");
-                    lobby_manager_clone.notify_lobby(&lobby_id_clone).await.ok();
-                }
-            } else {
-                // Handle the case where turn_change_sender is None
-            }
-        });
-
-        let ga = Arc::clone(&game_arc);
-        tokio::spawn(async move {
-            Game::process_action_queue(ga).await;
+            Game::process_action_queue(ga, card_arc).await;
         });
 
         // Return immediately
@@ -374,8 +396,6 @@ impl LobbyManager {
     }
 
     pub async fn notify_lobby(&self, lobby_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("updating the lobby");
-
         self.update_game_state(lobby_id).await;
 
         // Step 1: Get the Redis connection

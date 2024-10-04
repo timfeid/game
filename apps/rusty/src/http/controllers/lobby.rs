@@ -9,8 +9,9 @@ use tokio_stream::StreamExt;
 
 use crate::{
     error::{AppError, AppResult},
+    game::FrontendTarget,
     lobby::{
-        lobby::{Lobby, LobbyChat, LobbyData},
+        lobby::{DeckSelector, Lobby, LobbyChat, LobbyData},
         manager::LobbyManager,
     },
     services::jwt::{Claims, JwtService},
@@ -18,24 +19,24 @@ use crate::{
 };
 
 #[derive(Type, Serialize, Deserialize)]
-pub enum ActionCardTarget {
-    Player(i32),
-    CardInPlay(i32, i32),
-}
-
-#[derive(Type, Serialize, Deserialize)]
 pub struct ActionCardArgs {
     pub code: String,
     pub player_index: i32,
     pub in_play_index: i32,
-    pub target: Option<ActionCardTarget>,
+    pub target: Option<FrontendTarget>,
+}
+
+#[derive(Type, Serialize, Deserialize)]
+pub struct SelectDeckArgs {
+    pub code: String,
+    pub deck: DeckSelector,
 }
 
 #[derive(Type, Serialize, Deserialize)]
 pub struct PlayCardArgs {
     pub code: String,
     pub in_hand_index: i32,
-    pub target: Option<ActionCardTarget>,
+    pub target: Option<FrontendTarget>,
 }
 
 #[derive(Deserialize, Type)]
@@ -66,6 +67,25 @@ fn personalize_lobby_data_for_player(lobby_data: &mut LobbyData, user_id: &str) 
 
 pub struct LobbyController {}
 impl LobbyController {
+    pub async fn select_deck(ctx: Ctx, args: SelectDeckArgs) -> AppResult<()> {
+        let code = args.code;
+        let deck = args.deck;
+        let user = ctx.required_user()?;
+
+        // Step 1: Get the lobby instance from the lobby manager and release the lock
+        let l = Arc::clone(&ctx.lobby_manager);
+        let lobby = l
+            .get_lobby(&code)
+            .await
+            .map_err(|_| AppError::BadRequest("No such lobby".to_string()))?;
+
+        lobby.lock().await.select_deck(user, deck).await;
+
+        ctx.lobby_manager.notify_lobby(&code).await.ok();
+
+        Ok(())
+    }
+
     pub async fn ready(ctx: Ctx, code: String) -> AppResult<()> {
         let user = ctx.required_user()?;
 

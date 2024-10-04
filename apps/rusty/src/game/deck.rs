@@ -192,7 +192,219 @@ impl Deck {
                 vec![],
                 vec![],
             ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
+            Card::new(
+                "Island",
+                "TAP: Adds 1 blue mana to your pool.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Tap,
+                    CardRequiredTarget::None,
+                    Arc::new(GenerateManaAction {
+                        mana_to_add: vec![ManaType::Blue],
+                        target: PlayerActionTarget::SelfPlayer,
+                    }),
+                )],
+                CardPhase::Ready,
+                CardType::BasicLand(ManaType::Blue),
+                vec![],
+                vec![],
+            ),
             // 12 Blue Instants and Sorceries (Control Spells)
+            Card::new(
+                "Counter Spell",
+                "Counter target spell.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Instant,
+                    CardRequiredTarget::Spell,
+                    Arc::new(CounterSpellAction {}),
+                )],
+                CardPhase::Ready,
+                CardType::Instant,
+                vec![],
+                vec![ManaType::Blue, ManaType::Blue],
+            ),
+            Card::new(
+                "Counter Spell",
+                "Counter target spell.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Instant,
+                    CardRequiredTarget::Spell,
+                    Arc::new(CounterSpellAction {}),
+                )],
+                CardPhase::Ready,
+                CardType::Instant,
+                vec![],
+                vec![ManaType::Blue, ManaType::Blue],
+            ),
+            Card::new(
+                "Counter Spell",
+                "Counter target spell.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Instant,
+                    CardRequiredTarget::Spell,
+                    Arc::new(CounterSpellAction {}),
+                )],
+                CardPhase::Ready,
+                CardType::Instant,
+                vec![],
+                vec![ManaType::Blue, ManaType::Blue],
+            ),
+            Card::new(
+                "Counter Spell",
+                "Counter target spell.",
+                vec![CardActionTrigger::new(
+                    ActionTriggerType::Instant,
+                    CardRequiredTarget::Spell,
+                    Arc::new(CounterSpellAction {}),
+                )],
+                CardPhase::Ready,
+                CardType::Instant,
+                vec![],
+                vec![ManaType::Blue, ManaType::Blue],
+            ),
             Card::new(
                 "Counter Spell",
                 "Counter target spell.",
@@ -749,6 +961,22 @@ impl Deck {
                 "Hunter's Prowess",
                 "Target creature gets +3/+3 and trample until end of turn",
                 vec![
+                    CardActionTrigger::new(
+                        ActionTriggerType::Instant,
+                        CardRequiredTarget::CardOfType(CardType::Creature),
+                        Arc::new(ApplyEffectToTargetAction {
+                            effect_generator: Arc::new(|target, source_card| {
+                                let effect = StatModifierEffect::new(
+                                    target,
+                                    StatType::Defense,
+                                    3,
+                                    ExpireContract::Turns(1),
+                                    source_card,
+                                );
+                                Arc::new(Mutex::new(effect))
+                            }),
+                        }),
+                    ),
                     CardActionTrigger::new(
                         ActionTriggerType::Instant,
                         CardRequiredTarget::CardOfType(CardType::Creature),

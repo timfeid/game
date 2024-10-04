@@ -514,7 +514,7 @@ impl CardAction for DeclareBlockerAction {
                 EffectTarget::Card(arc) => {
                     &game
                         .combat
-                        .declare_attacker(Arc::clone(&card), target.clone())
+                        .declare_blocker(Arc::clone(&card), Arc::clone(arc))
                         .await;
                 }
             }

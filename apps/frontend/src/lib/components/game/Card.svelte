@@ -2,6 +2,8 @@
 	import type { Card, CardPhase, CardWithDetails } from '@gangsta/rusty';
 
 	export let cardWithDetails: CardWithDetails;
+	export let className: string = '';
+	export { className as class };
 	$: card = cardWithDetails.card;
 
 	// Function to display the current phase in a readable format
@@ -48,23 +50,38 @@
 <button
 	on:click
 	class:rotate-90={card.tapped}
-	class="flex flex-col card border border-gray-700 shadow-md p-2 rounded-md relative w-full"
+	class="flex flex-col border-[3px] dark:border-gray-700/40 border-gray-300/40 card dark:bg-gray-900 rounded-xl overflow-hidden relative w-[184px] h-[184px] transition duration-300 {className}"
 >
-	<div class="card-header flex items-center justify-between mb-2">
-		<h2 class="text-sm font-bold truncate">{card.name}</h2>
+	<div
+		class="card-header flex items-center justify-between mb-2 w-full py-1 px-2"
+		class:bg-green-200={card.card_type?.BasicLand === 'Green'}
+		class:bg-blue-200={card.card_type?.BasicLand === 'Blue'}
+		class:dark:bg-green-800={card.card_type?.BasicLand === 'Green'}
+		class:dark:bg-blue-800={card.card_type?.BasicLand === 'Blue'}
+	>
+		<h2 class="text-sm font-bold truncate">
+			{card.name}
+		</h2>
 		<div class="absolute flex space-x-2 right-2">
 			{#each card.cost as color}
 				<div
 					class="w-4 h-4 rounded-full"
 					class:bg-gray-100={color === 'Colorless'}
-					class:bg-green-100={color === 'Green'}
+					class:bg-green-400={color === 'Green'}
+					class:bg-blue-400={color === 'Blue'}
 				></div>
 			{/each}
 		</div>
 	</div>
 
-	<div class="card-type mb-2 flex w-full text-xs">
-		<div class="text-gray-600 text-left">{card.card_type}</div>
+	<div class="card-type mb-2 flex w-full text-xs px-2">
+		<div class="text-gray-600 text-left">
+			{#if typeof card.card_type === 'string'}
+				{card.card_type}
+			{:else if card.card_type?.BasicLand}
+				{card.card_type?.BasicLand} Land
+			{/if}
+		</div>
 		{#if !!damage || !!defense}
 			<div class="ml-auto">
 				{damage}/{defense}
@@ -72,14 +89,14 @@
 		{/if}
 	</div>
 
-	<div class="text-left mb-4 line-clamp-3 h-12">
+	<div class="text-left mb-4 line-clamp-3 h-16 px-2 text-sm">
 		<p class="text-muted">{card.description}</p>
 	</div>
 
 	<div class="card-current-phase mb-4">
-		<span class="text-xs md:text-sm text-gray-600"
-			>Phase: {displayCurrentPhase(card.current_phase)}</span
-		>
+		<span class="text-xs md:text-sm text-gray-600 px-2">
+			Phase: {displayCurrentPhase(card.current_phase)}
+		</span>
 	</div>
 
 	<div class="card-stats">

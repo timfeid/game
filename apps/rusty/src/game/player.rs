@@ -693,16 +693,32 @@ impl Player {
     pub async fn has_required_mana(&self, requirement: &Vec<ManaType>) -> bool {
         let mut required_mana = ManaPool::new();
 
+        // Accumulate the required mana
         for mana in requirement {
             required_mana.add_mana(*mana);
         }
 
-        self.mana_pool.white >= required_mana.white
+        // Check if the player has enough of each specific colored mana
+        let has_enough_colored_mana = self.mana_pool.white >= required_mana.white
             && self.mana_pool.blue >= required_mana.blue
             && self.mana_pool.black >= required_mana.black
             && self.mana_pool.red >= required_mana.red
-            && self.mana_pool.green >= required_mana.green
-            && self.mana_pool.colorless >= required_mana.colorless
+            && self.mana_pool.green >= required_mana.green;
+
+        if !has_enough_colored_mana {
+            return false;
+        }
+
+        // Calculate the total remaining mana after paying colored costs
+        let remaining_mana = (self.mana_pool.white - required_mana.white)
+            + (self.mana_pool.blue - required_mana.blue)
+            + (self.mana_pool.black - required_mana.black)
+            + (self.mana_pool.red - required_mana.red)
+            + (self.mana_pool.green - required_mana.green)
+            + self.mana_pool.colorless;
+
+        // Check if the remaining mana is enough to cover the colorless mana cost
+        remaining_mana >= required_mana.colorless
     }
 
     pub async fn can_play(&self, card: &Arc<Mutex<Card>>, is_my_turn: bool) -> bool {
@@ -724,22 +740,109 @@ impl Player {
     pub async fn pay_mana_for_card(&mut self, card: &Arc<Mutex<Card>>) {
         let card = card.lock().await;
 
-        // Deduct the mana from the player's pool according to the card's cost
+        // Counts of required mana
+        let mut white_required = 0;
+        let mut blue_required = 0;
+        let mut black_required = 0;
+        let mut red_required = 0;
+        let mut green_required = 0;
+        let mut generic_required = 0;
+
+        // Count the required mana costs
         for mana in &card.cost {
             match mana {
-                ManaType::White => self.mana_pool.white -= 1,
-                ManaType::Blue => self.mana_pool.blue -= 1,
-                ManaType::Black => self.mana_pool.black -= 1,
-                ManaType::Red => self.mana_pool.red -= 1,
-                ManaType::Green => self.mana_pool.green -= 1,
-                ManaType::Colorless => self.mana_pool.colorless -= 1,
+                ManaType::White => white_required += 1,
+                ManaType::Blue => blue_required += 1,
+                ManaType::Black => black_required += 1,
+                ManaType::Red => red_required += 1,
+                ManaType::Green => green_required += 1,
+                ManaType::Colorless => generic_required += 1,
             }
+        }
+
+        // Check if the player has enough colored mana
+        if self.mana_pool.white < white_required
+            || self.mana_pool.blue < blue_required
+            || self.mana_pool.black < black_required
+            || self.mana_pool.red < red_required
+            || self.mana_pool.green < green_required
+        {
+            // Not enough colored mana
+            // Handle error (e.g., return an error or panic)
+            panic!("Not enough colored mana to pay the cost.");
+        }
+
+        // Deduct the colored mana costs
+        self.mana_pool.white -= white_required;
+        self.mana_pool.blue -= blue_required;
+        self.mana_pool.black -= black_required;
+        self.mana_pool.red -= red_required;
+        self.mana_pool.green -= green_required;
+
+        // Now calculate the total available mana for generic costs
+        let total_available_mana = self.mana_pool.white
+            + self.mana_pool.blue
+            + self.mana_pool.black
+            + self.mana_pool.red
+            + self.mana_pool.green
+            + self.mana_pool.colorless;
+
+        // Check if total available mana is enough to pay for generic mana cost
+        if total_available_mana < generic_required {
+            // Not enough mana
+            // Handle error (e.g., return an error or panic)
+            panic!("Not enough mana to pay the generic mana cost.");
+        }
+
+        // Now deduct the generic mana cost from the player's mana pools
+        let mut remaining_generic = generic_required;
+
+        // Subtract from colorless mana pool first (optional preference)
+        let colorless_to_use = std::cmp::min(self.mana_pool.colorless, remaining_generic);
+        self.mana_pool.colorless -= colorless_to_use;
+        remaining_generic -= colorless_to_use;
+
+        // Then subtract from colored mana pools
+        if remaining_generic > 0 {
+            let white_to_use = std::cmp::min(self.mana_pool.white, remaining_generic);
+            self.mana_pool.white -= white_to_use;
+            remaining_generic -= white_to_use;
+        }
+
+        if remaining_generic > 0 {
+            let blue_to_use = std::cmp::min(self.mana_pool.blue, remaining_generic);
+            self.mana_pool.blue -= blue_to_use;
+            remaining_generic -= blue_to_use;
+        }
+
+        if remaining_generic > 0 {
+            let black_to_use = std::cmp::min(self.mana_pool.black, remaining_generic);
+            self.mana_pool.black -= black_to_use;
+            remaining_generic -= black_to_use;
+        }
+
+        if remaining_generic > 0 {
+            let red_to_use = std::cmp::min(self.mana_pool.red, remaining_generic);
+            self.mana_pool.red -= red_to_use;
+            remaining_generic -= red_to_use;
+        }
+
+        if remaining_generic > 0 {
+            let green_to_use = std::cmp::min(self.mana_pool.green, remaining_generic);
+            self.mana_pool.green -= green_to_use;
+            remaining_generic -= green_to_use;
+        }
+
+        // At this point, remaining_generic should be zero
+        if remaining_generic > 0 {
+            // This should not happen since we've already checked if we have enough mana
+            panic!("Unexpected error: Not all generic mana cost was paid.");
         }
 
         println!(
             "Player {} paid {} mana for {}",
             self.name,
-            card.format_mana_cost(), // Assuming card has a render_mana_cost method for formatted mana display
+            card.format_mana_cost(), // Assuming card has a format_mana_cost method for formatted mana display
             card.name
         );
     }

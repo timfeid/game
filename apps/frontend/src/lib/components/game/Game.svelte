@@ -68,5 +68,7 @@
 
 {#if lobby}
 	<svelte:component this={component} {...lobby} />
-	<pre class="mt-16">{JSON.stringify(lobby, null, 2)}</pre>
+	{#if $page.url.searchParams.has('debug')}
+		<pre class="mt-16">{JSON.stringify(lobby, null, 2)}</pre>
+	{/if}
 {/if}

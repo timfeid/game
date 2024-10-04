@@ -26,7 +26,7 @@ impl Combat {
     }
 
     /// Declare a blocker
-    pub async fn declare_blockers(
+    pub async fn declare_blocker(
         &mut self,
         blocker_card: Arc<Mutex<Card>>,
         attacker_card: Arc<Mutex<Card>>,
@@ -34,7 +34,6 @@ impl Combat {
         self.blockers.push((blocker_card, attacker_card));
     }
 
-    /// Resolve combat, with MTG-style combat damage distribution, including Trample
     pub async fn resolve_combat(&mut self) -> Vec<Arc<Mutex<Card>>> {
         println!("Resolving combat damage.");
         let mut destroyed_cards = Vec::new();
@@ -51,8 +50,6 @@ impl Combat {
                 blocker_card.get_stat_value(StatType::Defense)
             };
 
-            let blocker_card_ = Arc::clone(blocking_card_arc);
-
             // Apply damage to the blocker
             {
                 let mut blocker_card = blocking_card_arc.lock().await;
@@ -67,8 +64,7 @@ impl Combat {
                 // Check if blocker is destroyed
                 if blocker_card.damage_taken >= blocker_toughness {
                     println!("Blocker {} is destroyed!", blocker_card.name);
-                    // game.destroy_card(&blocking_card_arc).await;
-                    destroyed_cards.push(blocker_card_);
+                    destroyed_cards.push(Arc::clone(&blocking_card_arc));
                 }
             }
 
@@ -105,11 +101,11 @@ impl Combat {
             let mut is_blocked = false;
             let mut total_blocker_toughness = 0;
 
-            for (_, attacker) in &self.blockers {
-                if Arc::ptr_eq(attacker_card_arc, attacker) {
+            for (blocking_card_arc, blocked_attacker_card_arc) in &self.blockers {
+                if Arc::ptr_eq(attacker_card_arc, blocked_attacker_card_arc) {
                     is_blocked = true;
                     let blocker_toughness = {
-                        let blocker_card = attacker.lock().await;
+                        let blocker_card = blocking_card_arc.lock().await;
                         blocker_card.get_stat_value(StatType::Defense)
                     };
                     total_blocker_toughness += blocker_toughness;
@@ -122,9 +118,9 @@ impl Combat {
             };
 
             // Handle unblocked attackers
-            let x = if !is_blocked {
+            if !is_blocked {
                 self.apply_damage_to_target(attacker_damage, target, attacker_card_arc)
-                    .await
+                    .await;
             } else {
                 // Handle blocked attackers and check for Trample
                 let has_trample = {
@@ -136,17 +132,9 @@ impl Combat {
                     let excess_damage = attacker_damage.saturating_sub(total_blocker_toughness);
                     if excess_damage > 0 {
                         self.apply_damage_to_target(excess_damage, target, attacker_card_arc)
-                            .await
-                    } else {
-                        None
+                            .await;
                     }
-                } else {
-                    None
                 }
-            };
-
-            if let Some(x) = x {
-                destroyed_cards.push(x);
             }
         }
 
