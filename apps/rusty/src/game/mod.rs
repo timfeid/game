@@ -2,19 +2,20 @@ use std::{
     borrow::{Borrow, BorrowMut}, cell::RefCell, collections::HashMap, fmt, rc::Rc, sync::Arc, thread::Thread, time::Duration
 };
 
-use action::{Action, CardActionTarget, CardActionWrapper, CardRequiredTarget, CombatDamageAction, DestroySelfAction, TriggerTarget};
+use action::{Action, CardActionTarget, CardActionWrapper, CardRequiredTarget, CombatDamageAction, DestroyTargetCAction, TriggerTarget};
 use card::{Card, CardPhase, CardType};
 use combat::Combat;
 use effects::{EffectID, EffectManager, EffectTarget};
 use mana::ManaPool;
 use player::Player;
+use redis::Pipeline;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stat::{StatManager, StatType, Stats};
 use tokio::{select, sync::{broadcast, mpsc, Mutex, Notify, RwLock}, time::{sleep, timeout, Instant}};
 use turn::{Turn, TurnPhase};
 
-use crate::lobby::lobby::DeckSelector;
+use crate::lobby::{lobby::DeckSelector, manager::{LobbyCommand, LobbyTurnMessage}};
 
 pub mod combat;
 pub mod mana;
@@ -212,11 +213,24 @@ pub struct FrontendCardTarget {
     pub card_index: i32,
 }
 
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct Block {
+    pub attacker: FrontendCardTarget,
+    pub blocker: FrontendCardTarget,
+}
+
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct Attack {
+    pub attacker: FrontendCardTarget,
+    pub target: FrontendTarget,
+}
+
 #[derive(Type, Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PublicGameInfo {
     pub current_turn: Option<Turn>,
     pub priority_queue: Option<PriorityQueue>,
-    pub attacking_cards: Vec<FrontendCardTarget>
+    pub attacks: Vec<Attack>,
+    pub blocks: Vec<Block>,
 }
 
 #[derive(Type, Deserialize, Serialize, Debug, Clone)]
@@ -251,7 +265,8 @@ pub struct Game {
     #[serde(skip_serializing, skip_deserializing)]
     pub current_priority_player: Option<(Arc<Mutex<Player>>, i8, ActionType)>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub turn_change_sender: Option<broadcast::Sender<()>>,
+    pub turn_change_sender: Option<broadcast::Sender<Option<LobbyCommand>>>,
+    pub turn_messages: Vec<String>,
 }
 
 impl Game {
@@ -268,6 +283,40 @@ impl Game {
             combat: Combat::new(),
             current_priority_player: None,
             turn_change_sender: Some(sender),
+            turn_messages: vec![],
+        }
+    }
+
+    pub async fn frontend_target_from_card(&self, arc: &Arc<Mutex<Card>>) -> FrontendCardTarget {
+        for (player_index, player) in self.players.iter().enumerate() {
+            for (card_index, card) in player.clone().lock().await.cards_in_hand.iter().enumerate() {
+                if Arc::ptr_eq(card, &arc) {
+                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Hand, player_index: player_index as i32 };
+                }
+            }
+            for (card_index, card) in player.clone().lock().await.spells.iter().enumerate() {
+                if Arc::ptr_eq(card, &arc) {
+                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Spell, player_index: player_index as i32 };
+                }
+            }
+            for (card_index, card) in player.clone().lock().await.cards_in_play.iter().enumerate() {
+                if Arc::ptr_eq(card, &arc) {
+                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Play, player_index: player_index as i32 };
+                }
+            }
+        }
+
+        FrontendCardTarget {card_index: 0, pile: FrontendPileName::Hand, player_index: 0 }
+    }
+
+    pub async fn frontend_target_from_effect_target(&self, target: &EffectTarget) -> FrontendTarget {
+        match target {
+            EffectTarget::Player(arc) => {
+                FrontendTarget::Player(0)
+            },
+            EffectTarget::Card(arc) => {
+                FrontendTarget::Card(self.frontend_target_from_card(arc).await)
+            },
         }
     }
 
@@ -282,6 +331,7 @@ impl Game {
                 let mut card = card_arc.lock().await;
                 if card.card_type == CardType::Creature {
                     card.damage_taken = 0;
+                    card.damage_dealt_to_players = 0;
                 }
             }
         }
@@ -296,6 +346,8 @@ impl Game {
             let mut player = player_arc.lock().await;
             player.reset_spells();
         }
+
+        self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
     }
 
     pub async fn detach_cards_from(&mut self, card: &Arc<Mutex<Card>>) {
@@ -453,15 +505,12 @@ impl Game {
         }
 
         let action = {
-            Player::play_card(player, index, target, self.current_turn.clone().unwrap()).await?
+            Player::play_card(player, index, target.clone(), self.current_turn.clone().unwrap()).await?
         };
 
-
-
         self.add_to_stack(action);
-        println!("Action added to stack");
-
-
+        self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
+        println!("Action added to stack & applied effects.");
 
         Ok(())
     }
@@ -472,6 +521,25 @@ impl Game {
 
 
 
+    }
+
+    pub fn send_command(&mut self, command: LobbyCommand) {
+        if let Some(ref sender) = self.turn_change_sender {
+            let _ = sender.send(Some(command));
+        }
+    }
+
+    pub fn debug(&mut self, message: &str) {
+        println!("DEBUG: {}", message);
+        if let Some(ref sender) = self.turn_change_sender {
+            let _ = sender.send(Some(LobbyCommand::DebugMessage(message.to_string())));
+        }
+    }
+
+
+    pub fn add_turn_message(&mut self, message: String) {
+        self.turn_messages.push(message);
+        self.messages_updated();
     }
 
 
@@ -489,16 +557,18 @@ impl Game {
                 let collected_actions: Vec<Arc<dyn Action + Send + Sync>> = Card::collect_phase_based_actions(
                     card_rc,
                     &self.current_turn.clone().unwrap(),
-                    action::ActionTriggerType::PhaseBased(vec![], TriggerTarget::Any),
+                    action::ActionTriggerType::PhaseBased(vec![self.current_phase()], TriggerTarget::Any),
                 ).await;
+                println!("Card {} had actions {:?}", card_rc.lock().await.name, collected_actions);
                 actions.extend(collected_actions);
 
                 let has_effects = self.effect_manager.has_effects(card_rc).await;
                 if card_rc.lock().await.is_useless(has_effects) {
                     println!("card is considered useless, let's get rid of it");
                     actions.push(Arc::new(CardActionWrapper {
-                        action: Arc::new(DestroySelfAction {}),
-                        card: Arc::clone(card_rc)
+                        action: Arc::new(DestroyTargetCAction {}),
+                        card: Arc::clone(card_rc),
+                        target: None,
                     }));
                 }
             }
@@ -519,8 +589,14 @@ impl Game {
         self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
     }
 
+    pub fn reset_turn_messages(&mut self) {
+        self.turn_messages = vec![];
+        self.messages_updated();
+    }
+
 
     pub async fn start_turn(&mut self, player_index: usize) {
+        self.reset_turn_messages();
 
         self.current_turn = Some(Turn::new(
             self.players[player_index].clone(),
@@ -671,7 +747,7 @@ impl Game {
                 };
 
                 if let Some(sender) = sender {
-                    let _ = sender.send(());
+                    let _ = sender.send(None);
                 }
             }
 
@@ -688,10 +764,10 @@ impl Game {
     }
 
     pub async fn priority_loop(game_arc: Arc<RwLock<Game>>, source_card_arc: Arc<Mutex<Card>>) {
-        println!("Entering priority loop");
 
         let mut players_in_order = {
-            let game = game_arc.read().await;
+            let mut game = game_arc.write().await;
+            game.debug("Entering priority loop");
             game.get_players_in_priority_order(&source_card_arc.lock().await.owner.clone().unwrap())
         };
 
@@ -710,14 +786,14 @@ impl Game {
                     player.priority_turn_start().await;
                     println!("Player {}'s priority turn has started.", player.name);
                 }
-                let time_limit = if i == 0 { 10 } else { 3 };
+                let time_limit = if i == 0 { 3 } else { 3 };
 
                 {
                     let mut game = game_arc.write().await;
                     game.current_priority_player = Some((player_arc.clone(), time_limit.clone(), ActionType::None));
 
                     if let Some(ref sender) = game.turn_change_sender {
-                        let _ = sender.send(());
+                        let _ = sender.send(None);
                     }
                 }
 
@@ -759,7 +835,7 @@ impl Game {
                 {
                     let game = game_arc.read().await;
                     if let Some(ref sender) = game.turn_change_sender {
-                        let _ = sender.send(());
+                        let _ = sender.send(None);
                     }
                 }
 
@@ -774,13 +850,18 @@ impl Game {
     }
 
     pub async fn process_action_queue(game_arc: Arc<RwLock<Game>>, card_arc: Arc<Mutex<Card>>) {
-        let card_type = {
+        let card = {
 
-            card_arc.lock().await.card_type.clone()
+            card_arc.lock().await.clone()
         };
 
-        if card_type.is_spell() {
-            println!("Playing spell, we should wait for other players to see if counters are played.");
+        if card.card_type.is_spell() {
+            {
+                let mut game = game_arc.write().await;
+                game.add_turn_message(format!("{} is casting {}", card.owner.unwrap().lock().await.name, card.name));
+            }
+
+
             Self::priority_loop(Arc::clone(&game_arc), card_arc).await;
         }
 
@@ -790,10 +871,18 @@ impl Game {
 
 
         if let Some(ref sender) = game.turn_change_sender {
-            let _ = sender.send(());
+            let _ = sender.send(None);
         }
     }
 
+    pub fn messages_updated(&self) {
+
+        if let Some(ref sender) = self.turn_change_sender {
+            let _ = sender.send(Some(LobbyCommand::TurnMessages(LobbyTurnMessage {
+                messages: self.turn_messages.clone()
+            })));
+        }
+    }
 
     pub async fn advance_turn(&mut self) {
         if let Some(ref mut turn) = self.current_turn {
@@ -814,7 +903,7 @@ impl Game {
             let mut actions = self.collect_actions_for_phase().await;
             self.execute_actions(&mut actions).await;
 
-            println!(":: TURN ADVANCED :: {:?} effects: {:?}", self.current_turn.clone().unwrap().phase, self.effect_manager.effects);
+            println!(":: TURN ADVANCED :: {:?} effects: {:?}", self.current_turn.clone().unwrap().phase, "");
         }
     }
 
@@ -1084,31 +1173,6 @@ mod test {
                 vec![],
                 vec![],
             ),
-            Card::new(
-                "Blanchwood Armor",
-                "Enchanted creature gets +1/+1 for each Forest you control",
-                vec![CardActionTrigger::new(
-                    ActionTriggerType::Attached,
-                    CardRequiredTarget::CardOfType(CardType::Creature),
-                    Arc::new(ApplyEffectToCardBasedOnTotalCardType {
-                        card_type: CardType::BasicLand(ManaType::Green),
-                        effect_generator: Arc::new(|target, source_card, total| {
-                            let effect = StatModifierEffect::new(
-                                target,
-                                StatType::Defense,
-                                total,
-                                ExpireContract::Never,
-                                source_card,
-                            );
-                            Arc::new(Mutex::new(effect))
-                        }),
-                    }),
-                )],
-                CardPhase::Ready,
-                CardType::Enchantment,
-                vec![],
-                vec![ManaType::Green],
-            ),
         ])).await;
 
         game.start_turn(0).await;
@@ -1169,10 +1233,9 @@ mod test {
                         "Poison",
                         "Applies 2 damage for the next 3 turns after 1 turn.",
                         vec![
-                            CardActionTrigger::new(ActionTriggerType::PhaseBased(vec![TurnPhase::Upkeep], TriggerTarget::Owner),
+                            CardActionTrigger::new(ActionTriggerType::PhaseBased(vec![TurnPhase::Upkeep], TriggerTarget::Target),
                                 CardRequiredTarget::EnemyPlayer,
                                 Arc::new(CardDamageAction {
-                                    target: CardActionTarget::CardTarget
                                 })
                             )
                         ],
@@ -1194,7 +1257,7 @@ mod test {
                             })),
                         ],
                         CardPhase::Ready,
-                        CardType::Land(vec![ManaType::Black]),
+                        CardType::BasicLand(ManaType::Black),
                         vec![],
                         vec![]
                     ),
@@ -1233,23 +1296,6 @@ mod test {
                                     target,
                                     StatType::Defense,
                                     3,
-                                    ExpireContract::Never,
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToCardBasedOnTotalCardType {
-                            card_type: CardType::BasicLand(ManaType::Blue),
-                            effect_generator: Arc::new(|target, source_card, total| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    total,
                                     ExpireContract::Never,
                                     source_card,
                                 );

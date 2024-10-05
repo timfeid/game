@@ -29,6 +29,7 @@ pub enum StatType {
     Damage,
     Defense,
     Trample,
+    Lifelink,
 }
 
 impl Stat {

@@ -6,6 +6,7 @@
 	import { client } from '../../client';
 	import { user } from '../../stores/access-token';
 	import Button from '../ui/button/button.svelte';
+	import ManaBubble from './mana-bubble.svelte';
 
 	export let game_state: GameState;
 	export let join_code: string;
@@ -24,45 +25,48 @@
 	}
 </script>
 
-<div class="my-4">
-	<Button on:click={ready}>Ready up</Button>
+<div class="container !px-3">
+	<div class="flex items-center h-24">
+		<Button on:click={ready}>Ready up</Button>
+	</div>
 	{#if self.status === 'Spectator'}
-		<div class="flex items-center my-4">
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger asChild let:builder>
-					<Button builders={[builder]} variant="outline" class="w-[220px] flex justify-between">
-						<div>Select deck</div>
-						<div class="flex space-x-2 items-center">
-							<div class="uppercase text-xs text-gray-400">
-								{deck}
-							</div>
-
-							<div
-								class="w-3 h-3 rounded-full"
-								class:bg-green-400={deck === 'Green'}
-								class:bg-blue-400={deck === 'Blue'}
-							></div>
+		<DropdownMenu.Root>
+			<DropdownMenu.Trigger asChild let:builder>
+				<Button builders={[builder]} variant="outline" class="w-[220px] flex justify-between">
+					<div>Select deck</div>
+					<div class="flex space-x-2 items-center">
+						<div class="uppercase text-xs text-gray-400">
+							{deck}
 						</div>
-					</Button>
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="end" class="w-56">
-					<DropdownMenu.Item on:click={() => setDeck('Green')}>
-						<div
-							class="w-3 h-3 rounded-full border-green-400 border mr-2"
-							class:bg-green-400={deck === 'Green'}
-						></div>
-						<span> Green </span>
-					</DropdownMenu.Item>
-					<DropdownMenu.Item on:click={() => setDeck('Blue')}>
-						<div
-							class="w-3 h-3 rounded-full border-blue-400 border mr-2"
-							class:bg-blue-400={deck === 'Blue'}
-						></div>
-						<span>Blue</span>
-					</DropdownMenu.Item>
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
-		</div>
+
+						<ManaBubble color={deck} />
+					</div>
+				</Button>
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content align="end" class="w-56">
+				<DropdownMenu.Item on:click={() => setDeck('Green')}>
+					<div
+						class="w-3 h-3 rounded-full border-green-400 border mr-2"
+						class:bg-green-400={deck === 'Green'}
+					></div>
+					<span> Green </span>
+				</DropdownMenu.Item>
+				<DropdownMenu.Item on:click={() => setDeck('Blue')}>
+					<div
+						class="w-3 h-3 rounded-full border-blue-400 border mr-2"
+						class:bg-blue-400={deck === 'Blue'}
+					></div>
+					<span>Blue</span>
+				</DropdownMenu.Item>
+				<DropdownMenu.Item on:click={() => setDeck('Black')}>
+					<div
+						class="w-3 h-3 rounded-full border-black border mr-2"
+						class:bg-black={deck === 'Black'}
+					></div>
+					<span>Black</span>
+				</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
 	{:else}
 		<div class="mt-4">
 			looks like you're {self.status}

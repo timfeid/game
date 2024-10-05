@@ -2,7 +2,9 @@ use futures::stream::StreamExt;
 use futures::Stream;
 use redis::aio::PubSub;
 use redis::{AsyncCommands, Client};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use specta::Type;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::timeout;
@@ -25,6 +27,19 @@ use crate::services::jwt::{Claims, JwtService};
 pub struct LobbyManager {
     redis_client: Arc<redis::Client>,
     lobbies: Arc<Mutex<HashMap<String, Arc<Mutex<Lobby>>>>>,
+}
+
+#[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub struct LobbyTurnMessage {
+    pub messages: Vec<String>,
+}
+
+#[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub enum LobbyCommand {
+    Updated(LobbyData),
+    Messages(Vec<String>),
+    DebugMessage(String),
+    TurnMessages(LobbyTurnMessage),
 }
 
 impl std::fmt::Debug for LobbyManager {
@@ -55,10 +70,16 @@ impl LobbyManager {
             };
 
             if let Some(mut rx) = rx {
-                while let Ok(_) = rx.recv().await {
+                while let Ok(message) = rx.recv().await {
                     if let Some(lobby_manager) = lobby_manager_weak.upgrade() {
-                        // Use `lobby_manager` to notify the lobby
-                        lobby_manager.notify_lobby(&lobby_id_clone).await.ok();
+                        if let Some(command) = message {
+                            lobby_manager
+                                .send_command(&lobby_id_clone, command)
+                                .await
+                                .ok();
+                        } else {
+                            lobby_manager.notify_lobby(&lobby_id_clone).await.ok();
+                        }
                     } else {
                         // The LobbyManager has been dropped; exit the task
                         break;
@@ -88,9 +109,9 @@ impl LobbyManager {
         &self,
         lobby_id: String,
         access_token: String,
-    ) -> AppResult<impl Stream<Item = LobbyData>> {
+    ) -> AppResult<impl Stream<Item = LobbyCommand>> {
         let user = JwtService::decode(&access_token).or(Err(AppError::Unauthorized))?;
-        let (tx, rx) = mpsc::channel::<LobbyData>(100);
+        let (tx, rx) = mpsc::channel::<LobbyCommand>(100);
 
         println!("{:?} has joined!", user.claims);
 
@@ -112,7 +133,7 @@ impl LobbyManager {
     async fn handle_lobby_subscription(
         redis_client: Arc<redis::Client>,
         lobby_id: String,
-        tx: mpsc::Sender<LobbyData>,
+        tx: mpsc::Sender<LobbyCommand>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut pubsub_conn = redis_client.get_async_pubsub().await?;
         pubsub_conn.subscribe(&lobby_id).await?;
@@ -120,7 +141,7 @@ impl LobbyManager {
         let mut pubsub_stream = pubsub_conn.on_message();
         while let Some(message) = pubsub_stream.next().await {
             let payload: String = message.get_payload()?;
-            if let Ok(game) = serde_json::from_str::<LobbyData>(&payload) {
+            if let Ok(game) = serde_json::from_str::<LobbyCommand>(&payload) {
                 if tx.send(game).await.is_err() {
                     eprintln!("Receiver dropped");
                     break;
@@ -231,7 +252,7 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = Self::convert(args.target, lobby).await;
+            let target = { Self::convert(args.target, lobby).await };
             lobby
                 .lock()
                 .await
@@ -395,6 +416,21 @@ impl LobbyManager {
         }
     }
 
+    pub async fn send_command(
+        &self,
+        lobby_id: &str,
+        command: LobbyCommand,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Step 1: Get the Redis connection
+        let mut redis_conn = self.redis_client.get_multiplexed_async_connection().await?;
+
+        let lobby_data = serde_json::to_string(&command)?;
+        // Step 5: Publish the data to Redis.
+        redis_conn.publish(lobby_id, lobby_data).await?;
+
+        Ok(())
+    }
+
     pub async fn notify_lobby(&self, lobby_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         self.update_game_state(lobby_id).await;
 
@@ -409,7 +445,7 @@ impl LobbyManager {
         };
 
         // Step 3: Now lock the `lobby` with a timeout to detect potential deadlock.
-        let data = {
+        let data = LobbyCommand::Updated({
             let lobby = match timeout(Duration::from_secs(5), lobby.lock()).await {
                 Ok(lock) => lock.data.clone(),
                 Err(_) => {
@@ -418,7 +454,7 @@ impl LobbyManager {
                 }
             };
             lobby
-        };
+        });
 
         // Step 4: Serialize the lobby data.
         let lobby_data = serde_json::to_string(&data)?;

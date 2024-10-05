@@ -154,6 +154,9 @@ impl Combat {
             EffectTarget::Player(player_arc) => {
                 let mut player = player_arc.lock().await;
                 player.modify_stat(StatType::Health, -damage);
+                {
+                    attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
+                }
                 println!(
                     "Attacker {} deals {} damage to player {}",
                     attacker_card_arc.lock().await.name,

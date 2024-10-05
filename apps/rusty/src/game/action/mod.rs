@@ -12,14 +12,14 @@ use ulid::Ulid;
 
 use super::{
     card::{Card, CardType},
-    effects::{Effect, EffectTarget},
+    effects::{Effect, EffectID, EffectTarget, ExpireContract},
     mana::ManaType,
     player::Player,
     stat::{StatType, Stats},
     turn::{Turn, TurnPhase},
-    Game,
+    FrontendTarget, Game,
 };
-use crate::game::stat::Stat;
+use crate::{game::stat::Stat, lobby::manager::LobbyCommand};
 
 #[derive(Debug, Clone)]
 pub struct PlayerActionTrigger {
@@ -72,6 +72,7 @@ impl PlayerActionTrigger {
             ActionTriggerType::Sorcery => {
                 turn.phase == TurnPhase::Main || turn.phase == TurnPhase::Main2
             }
+            ActionTriggerType::OnDamageApplied => turn.phase == TurnPhase::CombatDamage,
         }
     }
 }
@@ -81,7 +82,7 @@ pub struct ResetCardAction {}
 
 #[async_trait::async_trait]
 impl CardAction for ResetCardAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         let mut card = card.lock().await;
         card.is_countered = false;
     }
@@ -113,16 +114,10 @@ pub struct CounterSpellAction {}
 
 #[async_trait::async_trait]
 impl CardAction for CounterSpellAction {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
-        // Get the target of the counter spell
-        let target = {
-            let card = card_arc.lock().await;
-            card.target.clone()
-        };
-
-        if let Some(EffectTarget::Card(target_action_arc)) = target {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        if let EffectTarget::Card(target_action_arc) = &target {
             target_action_arc.lock().await.is_countered = true;
-            println!("Countered a spell on the stack.");
+            game.debug("Countered a spell on the stack.");
         } else {
             println!("Target spell is not on the stack.");
         }
@@ -139,11 +134,19 @@ impl Action for PlayCardAction {
                 let mut player = self.player_arc.lock().await;
                 player.deck.destroy(Arc::clone(&self.card_arc));
             }
-            println!(
+            game.add_turn_message(format!(
                 "Spell {} was countered and moved to graveyard.",
                 self.card_arc.lock().await.name
-            );
+            ));
         } else {
+            {
+                let card = self.card_arc.lock().await;
+                game.add_turn_message(format!(
+                    "{} has played {}.",
+                    card.owner.clone().unwrap().lock().await.name,
+                    card.name
+                ));
+            }
             // Move the card to the battlefield
             {
                 let mut player = self.player_arc.lock().await;
@@ -159,14 +162,43 @@ impl Action for PlayCardAction {
             }
 
             // Collect and execute any immediate actions
+            // let mut actions = {
+            //     let card_lock = self.card_arc.lock().await;
+            //     card_lock.collect_phase_based_actions_sync(
+            //         &game.current_turn.clone().unwrap(),
+            //         ActionTriggerType::Instant,
+            //         &self.card_arc,
+            //     )
+            // };
+            // for action in actions {
+            //     game.add_to_stack(action);
+            // }
+            let target = self.target.clone();
+            // let mut actions = {
+            //     let (actions, _) = self
+            //         .card_arc
+            //         .lock()
+            //         .await
+            //         .collect_manual_actions(
+            //             Arc::clone(&self.card_arc),
+            //             game.current_phase(),
+            //             target.clone(),
+            //         )
+            //         .await;
+            //     actions
+            // };
+
             let mut actions = {
-                let card_lock = self.card_arc.lock().await;
-                card_lock.collect_phase_based_actions_sync(
-                    &game.current_turn.clone().unwrap(),
-                    ActionTriggerType::Instant,
+                let more_actions = Card::collect_phase_based_actions(
                     &self.card_arc,
+                    game.current_turn.as_ref().unwrap(),
+                    ActionTriggerType::Instant,
                 )
+                .await;
+                more_actions
             };
+
+            println!("instant actions? {:?}", actions);
 
             game.execute_actions(&mut actions).await;
 
@@ -187,13 +219,8 @@ pub struct ReturnToHandAction {}
 
 #[async_trait::async_trait]
 impl CardAction for ReturnToHandAction {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>) {
-        let target = {
-            let card = card_arc.lock().await;
-            card.target.clone()
-        };
-
-        if let Some(EffectTarget::Card(target_card_arc)) = target {
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        if let EffectTarget::Card(target_card_arc) = target {
             let owner_arc = {
                 let target_card = target_card_arc.lock().await;
                 target_card.owner.clone()
@@ -235,15 +262,51 @@ impl CardActionTrigger {
     }
 
     pub async fn trigger(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
+        let effect_target = match &self.trigger_type {
+            ActionTriggerType::PhaseBased(vec, trigger_target) => {
+                let owner = {
+                    if trigger_target == &TriggerTarget::Owner {
+                        &card.lock().await.owner.clone()
+                    } else {
+                        &None
+                    }
+                };
+
+                if let Some(owner) = owner {
+                    EffectTarget::Player(Arc::clone(owner))
+                } else {
+                    EffectTarget::Card(Arc::clone(&card))
+                }
+            }
+            // ActionTriggerType::Tap => todo!(),
+            // ActionTriggerType::OnDamageApplied => todo!(),
+            // ActionTriggerType::Instant => todo!(),
+            // ActionTriggerType::Attached => todo!(),
+            // ActionTriggerType::Detached => todo!(),
+            // ActionTriggerType::OnCardDestroyed => todo!(),
+            // ActionTriggerType::Sorcery => todo!(),
+            _ => {
+                if let Some(target) = card.lock().await.action_target.clone() {
+                    target
+                } else if let Some(target) = card.lock().await.attached.clone() {
+                    EffectTarget::Card(target)
+                } else if let Some(target) = card.lock().await.target.clone() {
+                    target
+                } else {
+                    EffectTarget::Card(Arc::clone(&card))
+                }
+            }
+        };
+
         match &self.trigger_type {
             ActionTriggerType::Tap => {
-                self.action.apply(game, card).await;
+                self.action.apply(game, card, effect_target).await;
             }
             ActionTriggerType::Attached => {
-                self.action.apply(game, card).await;
+                self.action.apply(game, card, effect_target).await;
             }
             ActionTriggerType::Instant => {
-                self.action.apply(game, card).await;
+                self.action.apply(game, card, effect_target).await;
             }
             x => {
                 println!("nothing triggered for {:?}", x);
@@ -303,6 +366,7 @@ pub enum ActionTriggerType {
     TapWithinPhases(Vec<TurnPhase>),
     ManualWithinPhases(Vec<ManaType>, Vec<TurnPhase>),
     PhaseBased(Vec<TurnPhase>, TriggerTarget),
+    OnDamageApplied,
     Instant,
     Attached,
     Detached,
@@ -312,13 +376,14 @@ pub enum ActionTriggerType {
 
 #[async_trait::async_trait]
 pub trait CardAction: Send + Sync + Debug {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>);
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget);
 }
 
 #[derive(Clone)]
 pub struct CardActionWrapper {
     pub action: Arc<dyn CardAction + Send + Sync>,
     pub card: Arc<Mutex<Card>>,
+    pub target: Option<EffectTarget>,
 }
 
 impl Debug for CardActionWrapper {
@@ -334,7 +399,13 @@ impl Action for CardActionWrapper {
     async fn apply(&self, game: &mut Game) {
         let card = Arc::clone(&self.card);
 
-        self.action.apply(game, card).await;
+        self.action
+            .apply(
+                game,
+                card.clone(),
+                self.target.clone().unwrap_or(EffectTarget::Card(card)),
+            )
+            .await;
     }
 }
 
@@ -377,10 +448,17 @@ pub struct ResetManaPoolAction {}
 #[async_trait]
 impl PlayerAction for ResetManaPoolAction {
     async fn apply(&self, game: &mut Game, player_index: usize) {
-        let mut player = game.players[player_index].lock().await;
-        println!("reseting mana pool.");
+        {
+            let mut player = game.players[player_index].lock().await;
+            println!("reseting mana pool.");
 
-        player.mana_pool.empty_pool();
+            player.mana_pool.empty_pool();
+        }
+        {
+            game.effect_manager
+                .apply_effects(game.current_turn.clone().unwrap())
+                .await;
+        }
     }
 }
 
@@ -436,41 +514,29 @@ pub trait Attachable: Debug + Send + Sync {
 
 #[derive(Debug, Clone)]
 pub struct CardDamageAction {
-    pub target: CardActionTarget,
+    // pub target: CardActionTarget,
 }
 
 #[async_trait]
 impl CardAction for CardDamageAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         let card = card.lock().await;
-        let target = &card.target;
+        // let target = &card.target;
 
-        match self.target {
-            CardActionTarget::CardTarget => {
-                if let Some(EffectTarget::Player(stats)) = target {
-                    let mut stats = stats.lock().await;
-                    let offense = card.get_stat_value(StatType::Damage);
-                    let defense = stats.get_stat_value(StatType::Defense);
-                    let total = offense - defense;
-                    println!("Do damage {} to {:?}", total, stats);
-                    stats.add_stat(
-                        Ulid::new().to_string(),
-                        Stat::new(StatType::Health, -1 * total),
-                    );
-                }
+        match target {
+            EffectTarget::Player(target) => {
+                let stats = &mut target.lock().await.stat_manager;
+                let offense = card.get_stat_value(StatType::Damage);
+                let defense = stats.get_stat_value(StatType::Defense);
+                let total = offense - defense;
+                println!("Do damage {} to {:?}", total, stats);
+                stats.add_stat(
+                    Ulid::new().to_string(),
+                    Stat::new(StatType::Health, -1 * total),
+                );
             }
             _ => todo!(),
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DestroySelfAction {}
-
-#[async_trait]
-impl CardAction for DestroySelfAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
-        game.destroy_card(&card).await;
     }
 }
 
@@ -479,24 +545,13 @@ pub struct DestroyTargetCAction {}
 
 #[async_trait]
 impl CardAction for DestroyTargetCAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
-        let target = {
-            let card = card.lock().await;
-            card.target.clone()
-        };
-
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         match target {
-            Some(EffectTarget::Card(target_card)) => {
+            EffectTarget::Card(target_card) => {
                 game.destroy_card(&target_card).await;
             }
-            Some(EffectTarget::Player(_)) => {
+            EffectTarget::Player(_) => {
                 println!("Cannot destroy a player");
-            }
-            Game => {
-                println!("cannot destroy taht");
-            }
-            None => {
-                println!("No target to destroy");
             }
         }
     }
@@ -507,20 +562,15 @@ pub struct DeclareBlockerAction {}
 
 #[async_trait::async_trait]
 impl CardAction for DeclareBlockerAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
-        if let Some(target) = &card.lock().await.action_target {
-            match target {
-                EffectTarget::Player(arc) => todo!(),
-                EffectTarget::Card(arc) => {
-                    &game
-                        .combat
-                        .declare_blocker(Arc::clone(&card), Arc::clone(arc))
-                        .await;
-                }
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
+        match target {
+            EffectTarget::Player(arc) => todo!(),
+            EffectTarget::Card(arc) => {
+                game.combat
+                    .declare_blocker(Arc::clone(&card), Arc::clone(&arc))
+                    .await;
             }
         }
-
-        ()
     }
 }
 
@@ -543,24 +593,14 @@ pub struct DeclareAttackerAction {}
 
 #[async_trait::async_trait]
 impl CardAction for DeclareAttackerAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
-        // Lock card once, retrieve necessary data, and release the lock
-        let action_target = {
-            let card_locked = card.lock().await;
-            card_locked.action_target.clone()
-        };
-
-        // Now use the action_target (no card lock)
-        if let Some(target) = action_target {
-            game.combat
-                .declare_attacker(Arc::clone(&card), target)
-                .await;
-        } else {
-            println!(
-                "No attacker specified to block for card {}.",
-                card.lock().await.name
-            );
-        }
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
+        println!(
+            "declaring \n\nattacker: {:?} \ntarget: {:?}\n\n",
+            card, target
+        );
+        game.combat
+            .declare_attacker(Arc::clone(&card), target)
+            .await;
     }
 }
 

@@ -59,6 +59,10 @@ impl ManaPool {
         }
     }
 
+    pub fn total(&self) -> u8 {
+        self.white + self.blue + self.black + self.red + self.green + self.colorless
+    }
+
     pub fn empty_pool(&mut self) {
         let played_card = self.played_card;
         *self = ManaPool::new();

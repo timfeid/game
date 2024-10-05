@@ -9,4 +9,6 @@
 	}
 </script>
 
-<Button on:click={createGame}>Create a game</Button>
+<div class="container !px-3 py-3">
+	<Button on:click={createGame}>Create a game</Button>
+</div>

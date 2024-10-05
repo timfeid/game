@@ -12,7 +12,7 @@ use crate::{
     game::FrontendTarget,
     lobby::{
         lobby::{DeckSelector, Lobby, LobbyChat, LobbyData},
-        manager::LobbyManager,
+        manager::{LobbyCommand, LobbyManager},
     },
     services::jwt::{Claims, JwtService},
     Ctx,
@@ -55,12 +55,14 @@ pub struct LobbyChatArgs {
     text: String,
 }
 
-fn personalize_lobby_data_for_player(lobby_data: &mut LobbyData, user_id: &str) {
-    // For each player in the game state
-    for (id, player_state) in &mut lobby_data.game_state.players {
-        if id != user_id {
-            // Hide private information
-            player_state.hand.clear();
+fn personalize_lobby_data_for_player(command: &mut LobbyCommand, user_id: &str) {
+    if let LobbyCommand::Updated(lobby_data) = command {
+        // For each player in the game state
+        for (id, player_state) in &mut lobby_data.game_state.players {
+            if id != user_id {
+                // Hide private information
+                player_state.hand.clear();
+            }
         }
     }
 }
@@ -188,7 +190,7 @@ impl LobbyController {
         ctx: Ctx,
         join_code: String,
         access_token: String,
-    ) -> impl Stream<Item = LobbyData> + Send + 'static {
+    ) -> impl Stream<Item = LobbyCommand> + Send + 'static {
         let manager = Arc::clone(&ctx.lobby_manager);
         let user_claims = JwtService::decode(&access_token).unwrap().claims;
 

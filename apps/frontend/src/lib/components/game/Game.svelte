@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { client, websocketClient } from '$lib/client';
 	import { accessToken } from '$lib/stores/access-token';
-	import type { LobbyData } from '@gangsta/rusty';
+	import type { LobbyCommand, LobbyData, LobbyTurnMessage } from '@gangsta/rusty';
 	import { Loader } from 'lucide-svelte';
 	import { type ComponentType } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -12,9 +12,26 @@
 
 	let lobby: LobbyData | undefined;
 	let unsubscribe: (() => void) | undefined;
+	let turnMessage: LobbyTurnMessage | undefined;
 
 	if (browser && $accessToken) {
 		reset($accessToken);
+	}
+
+	function isTurnMessages(data: LobbyCommand): data is { TurnMessages: LobbyTurnMessage } {
+		return 'TurnMessages' in data;
+	}
+
+	function isUpdated(data: LobbyCommand): data is { Updated: LobbyData } {
+		return 'Updated' in data;
+	}
+
+	function turnMessageReceived(updatedMessage: LobbyTurnMessage) {
+		turnMessage = updatedMessage;
+	}
+
+	function updated(data: LobbyData) {
+		lobby = data;
 	}
 
 	async function reset(accessToken: string) {
@@ -24,12 +41,17 @@
 		unsubscribe = websocketClient.addSubscription(
 			['lobby.subscribe', [$page.params.slug, accessToken]],
 			{
-				onStarted() {
-					console.log('started.');
-				},
 				onData(data) {
 					console.log(data);
-					lobby = data;
+					if (isUpdated(data)) {
+						return updated(data.Updated);
+					}
+					if (isTurnMessages(data)) {
+						return turnMessageReceived(data.TurnMessages);
+					}
+				},
+				onStarted() {
+					console.log('started.');
 				},
 				onError(e) {
 					console.log('error when streaming');
@@ -67,7 +89,7 @@
 </script>
 
 {#if lobby}
-	<svelte:component this={component} {...lobby} />
+	<svelte:component this={component} {...lobby} {turnMessage} />
 	{#if $page.url.searchParams.has('debug')}
 		<pre class="mt-16">{JSON.stringify(lobby, null, 2)}</pre>
 	{/if}

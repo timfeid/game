@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FrontendTarget, GameState, PublicGameInfo } from '@gangsta/rusty';
+	import type { FrontendTarget, GameState, LobbyTurnMessage, PublicGameInfo } from '@gangsta/rusty';
 	import { RSPCError } from '@rspc/client';
 	import { toast } from 'svelte-sonner';
 	import { client } from '../../client';
@@ -12,6 +12,7 @@
 	import { ArrowBigRight } from 'lucide-svelte';
 
 	export let game_state: GameState;
+	export let turnMessage: LobbyTurnMessage | undefined;
 	export let join_code: string;
 
 	$: self = game_state.players[$user?.sub || ''];
@@ -58,16 +59,16 @@
 <div class="min-h-[calc(100vh-3rem)] flex flex-col w-full">
 	<div class="flex-grow flex">
 		<div class="container !px-3">
-			<div class="h-24 flex items-center justify-between w-full">
+			<div class="h-24 flex items-center grid grid-cols-8 w-full">
 				{#if isMyTurn}
 					<Button on:click={turn}>
 						Advance turn
 						<ArrowBigRight class="pl-1" />
 					</Button>
 				{/if}
-				<PriorityQueueNotification game={game_state}></PriorityQueueNotification>
+				<PriorityQueueNotification {turnMessage} game={game_state}></PriorityQueueNotification>
 				{#if game_state.public_info.current_turn}
-					<div>
+					<div class="col-span-3 text-right">
 						Turn #{game_state.public_info.current_turn.turn_number},
 						{currentPlayer(game_state.public_info)}'s
 						{game_state.public_info.current_turn.phase}
@@ -88,7 +89,14 @@
 		<div class="container !px-3 relative flex mx-auto py-2">
 			<div class="grid gap-2 grid-cols-7">
 				{#each self.hand as card, i}
-					<CCard on:click={() => playCard(i)} cardWithDetails={card}></CCard>
+					<CCard
+						pile="Hand"
+						playerIndex={self.player_index}
+						cardIndex={i}
+						on:click={() => playCard(i)}
+						game={game_state}
+						cardWithDetails={card}
+					></CCard>
 				{/each}
 			</div>
 		</div>

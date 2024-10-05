@@ -28,7 +28,7 @@ use super::{
     Game,
 };
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Type)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Type)]
 pub enum CardType {
     Creature,
     Enchantment,
@@ -36,14 +36,14 @@ pub enum CardType {
     Sorcery,
     Artifact,
     BasicLand(ManaType),
-    Land(Vec<ManaType>),
+    // Land(Vec<ManaType>),
 }
 
 impl CardType {
     pub fn is_spell(&self) -> bool {
         match self {
             CardType::BasicLand(_) => false,
-            CardType::Land(_) => false,
+            // CardType::Land(_) => false,
             _ => true,
         }
     }
@@ -77,6 +77,8 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub action_target: Option<EffectTarget>,
     #[serde(skip_serializing, skip_deserializing)]
+    pub damage_dealt_to_players: i8,
+    #[serde(skip_serializing, skip_deserializing)]
     pub damage_taken: i8,
     pub is_countered: bool,
 }
@@ -105,6 +107,7 @@ impl Card {
             attached: None,
             action_target: None,
             damage_taken: 0,
+            damage_dealt_to_players: 0,
             is_countered: false,
         };
         card.triggers.push(CardActionTrigger::new(
@@ -126,6 +129,7 @@ impl Card {
                 ActionTriggerType::ManualWithinPhases(vec, vec1) => true,
                 ActionTriggerType::PhaseBased(vec, trigger_target) => true,
                 ActionTriggerType::Attached => true,
+                ActionTriggerType::OnDamageApplied => true,
 
                 ActionTriggerType::Sorcery => false,
                 ActionTriggerType::Instant => false,
@@ -143,50 +147,61 @@ impl Card {
         !has_triggers && !has_effects
     }
 
-    pub fn collect_phase_based_actions_sync(
-        &self,
-        turn: &Turn,
-        trigger_type: ActionTriggerType,
-        card_arc: &Arc<Mutex<Card>>,
-    ) -> Vec<Arc<dyn Action + Send + Sync>> {
-        let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+    // pub fn collect_phase_based_actions_sync(
+    //     &self,
+    //     turn: &Turn,
+    //     trigger_type: ActionTriggerType,
+    //     card_arc: &Arc<Mutex<Card>>,
+    // ) -> Vec<Arc<dyn Action + Send + Sync>> {
+    //     let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
-        let owner = match &self.owner {
-            Some(owner) => Arc::clone(owner),
-            None => return phase_based_actions,
-        };
+    //     let owner = match &self.owner {
+    //         Some(owner) => Arc::clone(owner),
+    //         None => return phase_based_actions,
+    //     };
 
-        for action_trigger in &self.triggers {
-            if let ActionTriggerType::PhaseBased(trigger_phase, trigger_target) =
-                &action_trigger.trigger_type
-            {
-                let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
-                if trigger_phase.contains(&turn.phase)
-                    && match trigger_target {
-                        super::action::TriggerTarget::Owner => is_owner,
-                        super::action::TriggerTarget::Target => !is_owner,
-                        super::action::TriggerTarget::Any => true,
-                    }
-                {
-                    phase_based_actions.push(Arc::new(CardActionWrapper {
-                        card: Arc::clone(card_arc),
-                        action: action_trigger.action.clone(),
-                    }));
-                }
-            } else if &trigger_type == &action_trigger.trigger_type {
-                phase_based_actions.push(Arc::new(CardActionWrapper {
-                    card: Arc::clone(card_arc),
-                    action: action_trigger.action.clone(),
-                }));
-            }
-        }
+    //     for action_trigger in &self.triggers {
+    //         if let ActionTriggerType::PhaseBased(trigger_phase, trigger_target) =
+    //             &action_trigger.trigger_type
+    //         {
+    //             let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
+    //             if trigger_phase.contains(&turn.phase)
+    //                 && match trigger_target {
+    //                     super::action::TriggerTarget::Owner => is_owner,
+    //                     super::action::TriggerTarget::Target => !is_owner,
+    //                     super::action::TriggerTarget::Any => true,
+    //                 }
+    //             {
+    //                 phase_based_actions.push(Arc::new(CardActionWrapper {
+    //                     card: Arc::clone(card_arc),
+    //                     action: action_trigger.action.clone(),
+    //                     target: match trigger_target {
+    //                         action::TriggerTarget::Owner => {
+    //                             Some(EffectTarget::Player(Arc::clone(&owner)))
+    //                         }
+    //                         action::TriggerTarget::Target => {
+    //                             card_arc.lock().await.action_target.clone()
+    //                         }
+    //                         action::TriggerTarget::Any => None,
+    //                     },
+    //                 }));
+    //             }
+    //         } else if &trigger_type == &action_trigger.trigger_type {
+    //             phase_based_actions.push(Arc::new(CardActionWrapper {
+    //                 card: Arc::clone(card_arc),
+    //                 action: action_trigger.action.clone(),
+    //                 target: None,
+    //             }));
+    //         }
+    //     }
 
-        phase_based_actions
-    }
+    //     phase_based_actions
+    // }
 
     pub async fn collect_attach_actions(
         &self,
         card_arc: Arc<Mutex<Card>>,
+        target: Option<EffectTarget>,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
@@ -196,6 +211,7 @@ impl Card {
                     actions.push(Arc::new(CardActionWrapper {
                         card: Arc::clone(&card_arc),
                         action: action_trigger.action.clone(),
+                        target: target.clone(),
                     }));
                 }
                 _ => {}
@@ -209,6 +225,7 @@ impl Card {
         &self,
         card_arc: Arc<Mutex<Card>>,
         turn_phase: TurnPhase,
+        target: Option<EffectTarget>,
     ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool) {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let mut requires_tap = false;
@@ -220,6 +237,7 @@ impl Card {
                     actions.push(Arc::new(CardActionWrapper {
                         card: Arc::clone(&card_arc),
                         action: action_trigger.action.clone(),
+                        target: target.clone(),
                     }));
                 }
                 ActionTriggerType::ManualWithinPhases(mana_requirements, allowed_phases) => {
@@ -227,6 +245,7 @@ impl Card {
                         actions.push(Arc::new(CardActionWrapper {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
+                            target: target.clone(),
                         }));
                     }
                 }
@@ -236,6 +255,7 @@ impl Card {
                         actions.push(Arc::new(CardActionWrapper {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
+                            target: target.clone(),
                         }));
                     }
                 }
@@ -275,12 +295,22 @@ impl Card {
                     phase_based_actions.push(Arc::new(CardActionWrapper {
                         card: Arc::clone(card_arc),
                         action: action_trigger.action.clone(),
+                        target: match trigger_target {
+                            action::TriggerTarget::Owner => {
+                                Some(EffectTarget::Player(Arc::clone(&owner)))
+                            }
+                            action::TriggerTarget::Target => {
+                                card_arc.lock().await.action_target.clone()
+                            }
+                            action::TriggerTarget::Any => None,
+                        },
                     }));
                 }
             } else if &trigger_type == &action_trigger.trigger_type {
                 phase_based_actions.push(Arc::new(CardActionWrapper {
                     card: Arc::clone(card_arc),
                     action: action_trigger.action.clone(),
+                    target: None,
                 }));
             }
         }
@@ -328,24 +358,24 @@ impl Card {
         Ok(())
     }
 
-    async fn collect_attached_actions(
-        card: &Arc<Mutex<Card>>,
-        target_card: &Arc<Mutex<Card>>,
-        game: &mut Game,
-    ) -> Option<Vec<Arc<dyn Action + Send + Sync>>> {
-        let attached_actions = Card::collect_phase_based_actions(
-            card,
-            &game.current_turn.clone().unwrap(),
-            ActionTriggerType::Attached,
-        )
-        .await;
+    // async fn collect_attached_actions(
+    //     card: &Arc<Mutex<Card>>,
+    //     target_card: &Arc<Mutex<Card>>,
+    //     game: &mut Game,
+    // ) -> Option<Vec<Arc<dyn Action + Send + Sync>>> {
+    //     let attached_actions = Card::collect_phase_based_actions(
+    //         card,
+    //         &game.current_turn.clone().unwrap(),
+    //         ActionTriggerType::Attached,
+    //     )
+    //     .await;
 
-        if attached_actions.is_empty() {
-            None
-        } else {
-            Some(attached_actions)
-        }
-    }
+    //     if attached_actions.is_empty() {
+    //         None
+    //     } else {
+    //         Some(attached_actions)
+    //     }
+    // }
 
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
@@ -416,24 +446,32 @@ impl Stats for Card {
 
 pub mod card {
     macro_rules! create_creature_card {
-        ($name:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*]) => {
+        ($name:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*] $(, $additional_triggers:expr)*) => {
             Card::new(
                 $name,
                 $description,
-                vec![
-                    // Action to declare the creature as an attacker in the Declare Attackers phase
-                    CardActionTrigger::new(
-                        ActionTriggerType::TapWithinPhases(vec![TurnPhase::DeclareAttackers]),
-                        CardRequiredTarget::EnemyCardOrPlayer,
-                        Arc::new(DeclareAttackerAction {}),
-                    ),
-                    // Action to manually declare the creature as a blocker in the Declare Blockers phase
-                    CardActionTrigger::new(
-                        ActionTriggerType::ManualWithinPhases(vec![], vec![TurnPhase::DeclareBlockers]),
-                        CardRequiredTarget::EnemyCardInCombat,
-                        Arc::new(DeclareBlockerAction {}),
-                    ),
-                ],
+                {
+                    // Start with the default triggers
+                    let mut triggers = vec![
+                        // Action to declare the creature as an attacker in the Declare Attackers phase
+                        CardActionTrigger::new(
+                            ActionTriggerType::TapWithinPhases(vec![TurnPhase::DeclareAttackers]),
+                            CardRequiredTarget::EnemyCardOrPlayer,
+                            Arc::new(DeclareAttackerAction {}),
+                        ),
+                        // Action to manually declare the creature as a blocker in the Declare Blockers phase
+                        CardActionTrigger::new(
+                            ActionTriggerType::ManualWithinPhases(vec![], vec![TurnPhase::DeclareBlockers]),
+                            CardRequiredTarget::EnemyCardInCombat,
+                            Arc::new(DeclareBlockerAction {}),
+                        ),
+                    ];
+
+                    // Add any additional triggers provided
+                    $(triggers.push($additional_triggers);)*
+
+                    triggers
+                },
                 // Card starts with a charging phase (this can be customized)
                 CardPhase::Charging(1),
                 // Card type is a Creature

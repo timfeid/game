@@ -16,12 +16,7 @@ use tokio::{sync::Mutex, time::sleep};
 
 use crate::{
     error::{AppError, AppResult},
-    game::{
-        action::{DestroySelfAction, DestroyTargetCAction},
-        card::CardType,
-        mana::ManaType,
-        turn,
-    },
+    game::{action::DestroyTargetCAction, card::CardType, mana::ManaType, turn},
 };
 
 use super::{
@@ -172,38 +167,79 @@ impl Player {
         game: &mut Game,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions = vec![];
-        let mut indices_to_detach = vec![index];
+        let mut cards_to_detach = vec![];
 
-        while let Some(current_index) = indices_to_detach.pop() {
-            if current_index >= self.cards_in_play.len() {
-                continue; // Index out of bounds, skip
-            }
+        if index >= self.cards_in_play.len() {
+            // Index out of bounds, return empty actions
+            return actions;
+        }
 
-            let card_arc = self.cards_in_play.remove(current_index);
+        // Remove the card from cards_in_play and add it to the list of cards to detach
+        let card_arc = self.cards_in_play.remove(index);
+        cards_to_detach.push(card_arc);
 
-            // Remove effects applied by this card
+        while let Some(card_arc) = cards_to_detach.pop() {
+            // Remove effects associated with this card
             game.effect_manager
                 .remove_effects_by_source(&card_arc)
                 .await;
 
-            // Handle attached cards
-            if let Some(attached_arc) = {
-                let mut card = card_arc.lock().await;
-                card.attached.take()
-            } {
-                // Find the index of the attached card
-                if let Some(attached_index) = self
-                    .cards_in_play
-                    .iter()
-                    .position(|c| Arc::ptr_eq(c, &attached_arc))
-                {
-                    // Add the attached card index to the list to be detached
-                    indices_to_detach.push(attached_index);
+            // Lock the card to access its fields
+            let mut card = card_arc.lock().await;
+
+            // If this card has an attached card, detach it and add to cards_to_detach
+            if let Some(attached_arc) = card.attached.take() {
+                cards_to_detach.push(attached_arc);
+            }
+
+            // Release the lock on card before proceeding
+            drop(card);
+
+            // Remove references to this card from other cards
+            for other_card_arc in &self.cards_in_play {
+                let mut other_card = other_card_arc.lock().await;
+
+                // Remove references from target
+                if let Some(t) = &other_card.target {
+                    if let EffectTarget::Card(arc) = &t {
+                        if Arc::ptr_eq(arc, &card_arc) {
+                            other_card.target = None;
+                        }
+                    }
+                }
+
+                // Remove references from action_target
+                if let Some(t) = &other_card.action_target {
+                    if let EffectTarget::Card(arc) = &t {
+                        if Arc::ptr_eq(arc, &card_arc) {
+                            other_card.action_target = None;
+                        }
+                    }
+                }
+
+                // Remove references from attached
+                if let Some(attached_arc) = &other_card.attached {
+                    if Arc::ptr_eq(attached_arc, &card_arc) {
+                        // If the attached card is the detached card, detach it
+                        let detached_attached_arc = other_card.attached.take();
+                        if let Some(detached_attached_arc) = detached_attached_arc {
+                            cards_to_detach.push(detached_attached_arc);
+                        }
+                    }
                 }
             }
 
-            // Optionally, collect actions triggered by the card's detachment
-            // actions.extend(self.collect_detach_actions(card_arc.clone()).await);
+            // Also, remove the card from cards_in_play if it's still there
+            if let Some(pos) = self
+                .cards_in_play
+                .iter()
+                .position(|c| Arc::ptr_eq(c, &card_arc))
+            {
+                self.cards_in_play.remove(pos);
+            }
+
+            // Optionally, accumulate any actions resulting from detaching the card
+            // actions.extend(card.on_detach_actions());
         }
 
         actions
@@ -387,14 +423,13 @@ impl Player {
                 if Arc::ptr_eq(_card, card) {
                     return Err("Cannot attach to self".to_string());
                 }
-                println!("attaching {} to {:?}", card_l.name, _card);
-                // _card.lock().await.attached = Some(Arc::clone(card));
+                card_l.attached = Some(Arc::clone(_card));
             }
-            // card_l.attached =
-            card_l.action_target = target.clone();
-            card_l.target = target.clone();
-
-            card_l.collect_attach_actions(Arc::clone(&card)).await
+            // card_l.action_target = target.clone();
+            // card_l.target = target.clone();
+            card_l
+                .collect_attach_actions(Arc::clone(&card), target.clone())
+                .await
         };
 
         Ok(actions)
@@ -408,13 +443,14 @@ impl Player {
     ) -> Result<Vec<Arc<dyn Action + Send + Sync>>, String> {
         let (actions, requires_tap) = {
             let card = Arc::clone(&self.cards_in_play[in_play_index]);
-            let mut card_l = card.lock().await;
-            card_l.action_target = target.clone();
+            let card_l = card.lock().await;
+            // card_l.action_target = target.clone();
 
             card_l
                 .collect_manual_actions(
                     Arc::clone(&card),
                     game.current_turn.as_ref().unwrap().phase,
+                    target.clone(),
                 )
                 .await
         };
@@ -438,7 +474,6 @@ impl Player {
         let mutex = card.clone();
         let mut card_l = mutex.lock().await;
 
-        card_l.action_target = target;
         card_l.tap()?;
         // let actions = Card::collect_phase_based_actions(
         //     &card,
@@ -448,7 +483,11 @@ impl Player {
         // .await;
 
         let response = card_l
-            .collect_manual_actions(Arc::clone(card), game.current_turn.as_ref().unwrap().phase)
+            .collect_manual_actions(
+                Arc::clone(card),
+                game.current_turn.as_ref().unwrap().phase,
+                target,
+            )
             .await;
 
         Ok(response.0)
@@ -547,7 +586,7 @@ impl Player {
         for card_arc in &self.cards_in_play {
             let card = card_arc.lock().await;
             let mut card_actions = card
-                .collect_manual_actions(Arc::clone(card_arc), turn_phase)
+                .collect_manual_actions(Arc::clone(card_arc), turn_phase, None)
                 .await;
             actions.append(&mut card_actions.0);
         }
@@ -840,10 +879,11 @@ impl Player {
         }
 
         println!(
-            "Player {} paid {} mana for {}",
+            "Player {} paid {} mana for {} new pool {:?}",
             self.name,
             card.format_mana_cost(), // Assuming card has a format_mana_cost method for formatted mana display
-            card.name
+            card.name,
+            self.mana_pool
         );
     }
 }

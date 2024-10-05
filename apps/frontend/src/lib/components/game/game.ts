@@ -48,12 +48,13 @@ async function search(card: CardWithDetails, game: GameState): Promise<undefined
 						// }
 					}
 					if (card.required_target === 'EnemyCardInCombat') {
+						console.log(game.public_info);
 						if (
-							game.public_info.attacking_cards.find((x) => {
+							game.public_info.attacks.find((x) => {
 								return (
-									x.pile === c.pile &&
-									x.card_index === c.card_index &&
-									x.player_index === c.player_index
+									x.attacker.pile === c.pile &&
+									x.attacker.card_index === c.card_index &&
+									x.attacker.player_index === c.player_index
 								);
 							})
 						) {
@@ -90,7 +91,7 @@ export async function waitForTarget(
 	forPlay = false
 ): Promise<undefined | FrontendTarget> {
 	console.log(card);
-	if (card.required_target === 'None' || card.action_type === 'None') {
+	if (!card || card.required_target === 'None' || card.action_type === 'None') {
 		return undefined;
 	}
 	if (card.action_type !== 'Instant' && forPlay) {

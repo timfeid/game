@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 
 use crate::game::{
     card::Card,
+    effects::EffectTarget,
     stat::{Stat, StatType, Stats},
     Game,
 };
@@ -18,8 +19,8 @@ pub struct CardAddStatAction {
 
 #[async_trait::async_trait]
 impl CardAction for CardAddStatAction {
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
-        println!("add stat?");
+    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
+        println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;
         card.add_stat(self.id.clone(), self.stat.clone());
     }

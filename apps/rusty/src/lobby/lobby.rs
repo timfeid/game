@@ -62,31 +62,49 @@ impl Lobby {
             }
         };
 
-        let attacking_cards = {
-            let mut attacking_cards = vec![];
+        let blocks = {
+            let mut blocks = vec![];
+            let cloned_game = self.cloned_game().await;
+            let game = cloned_game.read().await;
+            for (blocker, attacker) in game.combat.blockers.iter() {
+                blocks.push(Block {
+                    attacker: { game.frontend_target_from_card(attacker).await },
+                    blocker: { game.frontend_target_from_card(blocker).await },
+                })
+            }
+
+            blocks
+        };
+
+        let attacks = {
+            let mut attacks = vec![];
             let cloned_game = self.cloned_game().await;
             let game = cloned_game.read().await;
             let turn = game.current_turn.clone().unwrap();
             let player = turn.current_player;
             for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
-                for (attacker, _) in game.combat.attackers.iter() {
+                for (attacker, target) in game.combat.attackers.iter() {
                     if Arc::ptr_eq(attacker, card) {
-                        attacking_cards.push(FrontendCardTarget {
-                            player_index: turn.current_player_index,
-                            pile: FrontendPileName::Play,
-                            card_index: index as i32,
+                        attacks.push(Attack {
+                            target: game.frontend_target_from_effect_target(target).await,
+                            attacker: FrontendCardTarget {
+                                player_index: turn.current_player_index,
+                                pile: FrontendPileName::Play,
+                                card_index: index as i32,
+                            },
                         });
                     }
                 }
             }
 
-            attacking_cards
+            attacks
         };
 
         PublicGameInfo {
             current_turn: self.game.read().await.current_turn.clone(),
             priority_queue,
-            attacking_cards,
+            attacks,
+            blocks,
         }
     }
 
@@ -106,14 +124,15 @@ use ulid::Ulid;
 pub enum DeckSelector {
     Green,
     Blue,
+    Black,
 }
 
 use crate::{
     error::{AppError, AppResult},
     game::{
-        deck::Deck, effects::EffectTarget, player::Player, CardWithDetails, FrontendCardTarget,
-        FrontendPileName, FrontendTarget, Game, GameState, GameStatus, PlayerState, PlayerStatus,
-        PriorityQueue, PublicGameInfo,
+        deck::Deck, effects::EffectTarget, player::Player, Attack, Block, CardWithDetails,
+        FrontendCardTarget, FrontendPileName, FrontendTarget, Game, GameState, GameStatus,
+        PlayerState, PlayerStatus, PriorityQueue, PublicGameInfo,
     },
     services::jwt::Claims,
 };
@@ -181,6 +200,7 @@ impl Lobby {
             let deck = Deck::new(match player.deck {
                 DeckSelector::Green => Deck::create_green_deck(),
                 DeckSelector::Blue => Deck::create_blue_deck(),
+                DeckSelector::Black => Deck::create_black_deck(),
             });
             deck.set_owner(&player.player).await;
 
