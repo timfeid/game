@@ -1,8 +1,18 @@
 use std::{
-    borrow::{Borrow, BorrowMut}, cell::RefCell, collections::HashMap, fmt, rc::Rc, sync::Arc, thread::Thread, time::Duration
+    borrow::{Borrow, BorrowMut},
+    cell::RefCell,
+    collections::HashMap,
+    fmt,
+    rc::Rc,
+    sync::Arc,
+    thread::Thread,
+    time::Duration,
 };
 
-use action::{Action, CardActionTarget, CardActionWrapper, CardRequiredTarget, CombatDamageAction, DestroyTargetCAction, TriggerTarget};
+use action::{
+    Action, ActionTriggerType, CardActionTarget, CardActionWrapper, CardRequiredTarget,
+    CombatDamageAction, DestroyTargetCAction, TriggerTarget,
+};
 use card::{Card, CardPhase, CardType};
 use combat::Combat;
 use effects::{EffectID, EffectManager, EffectTarget};
@@ -12,22 +22,28 @@ use redis::Pipeline;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use stat::{StatManager, StatType, Stats};
-use tokio::{select, sync::{broadcast, mpsc, Mutex, Notify, RwLock}, time::{sleep, timeout, Instant}};
+use tokio::{
+    select,
+    sync::{broadcast, mpsc, Mutex, Notify, RwLock},
+    time::{sleep, timeout, Instant},
+};
 use turn::{Turn, TurnPhase};
 
-use crate::lobby::{lobby::DeckSelector, manager::{LobbyCommand, LobbyTurnMessage}};
+use crate::lobby::{
+    lobby::DeckSelector,
+    manager::{LobbyCommand, LobbyTurnMessage},
+};
 
-pub mod combat;
-pub mod mana;
 pub mod action;
 pub mod card;
-pub mod deck;
+pub mod combat;
+pub mod decks;
 pub mod effects;
+pub mod mana;
 pub mod player;
 pub mod stat;
+pub mod test;
 pub mod turn;
-
-
 
 enum PhaseAction {
     Untap(usize),
@@ -80,43 +96,31 @@ pub struct CardWithDetails {
     pub card: Card,
     pub required_target: CardRequiredTarget,
     pub action_type: ActionType,
-
 }
 
 impl CardWithDetails {
-    fn get_required_target(card: &Card,
-
-
-        turn_phase: TurnPhase,
-
-    ) -> (CardRequiredTarget, ActionType) {
-
-
+    fn get_required_target(card: &Card, turn_phase: TurnPhase) -> (CardRequiredTarget, ActionType) {
         if card.tapped {
-
             return (CardRequiredTarget::None, ActionType::None);
         }
 
         if card.current_phase != CardPhase::Ready {
             if turn_phase == TurnPhase::DeclareBlockers && card.card_type != CardType::Creature {
-
                 return (CardRequiredTarget::None, ActionType::None);
             }
         }
 
         for trigger in card.triggers.iter() {
             match &trigger.trigger_type {
-                action::ActionTriggerType::Tap => {
+                action::ActionTriggerType::CardTapped => {
                     return (trigger.card_required_target.clone(), ActionType::Tap)
-                },
-                action::ActionTriggerType::TapWithinPhases(allowed_phases) => {
+                }
+                action::ActionTriggerType::CardTappedWithinPhases(allowed_phases) => {
                     if allowed_phases.contains(&turn_phase) {
-
                         return (trigger.card_required_target.clone(), ActionType::Tap);
                     }
                 }
-,
-                action::ActionTriggerType::Instant => {
+                action::ActionTriggerType::CardInPlay => {
                     if &trigger.card_required_target != &CardRequiredTarget::None {
                         return (trigger.card_required_target.clone(), ActionType::Instant);
                     }
@@ -126,19 +130,14 @@ impl CardWithDetails {
                     if &turn_phase == &TurnPhase::Main {
                         return (trigger.card_required_target.clone(), ActionType::Attach);
                     }
-
                 }
 
-                action::ActionTriggerType::ManualWithinPhases(required_mana, allowed_phases) => {
+                action::ActionTriggerType::ActionedWithinPhases(required_mana, allowed_phases) => {
                     if allowed_phases.contains(&turn_phase) {
                         return (trigger.card_required_target.clone(), ActionType::Instant);
                     }
-
                 }
-                x => {
-
-
-                }
+                x => {}
             }
         }
 
@@ -146,8 +145,13 @@ impl CardWithDetails {
     }
 
     pub fn from_card(card: Card, turn_phase: TurnPhase) -> CardWithDetails {
-        let (required_target, action_type) = CardWithDetails::get_required_target(&card, turn_phase);
-        CardWithDetails { card, required_target, action_type }
+        let (required_target, action_type) =
+            CardWithDetails::get_required_target(&card, turn_phase);
+        CardWithDetails {
+            card,
+            required_target,
+            action_type,
+        }
     }
 }
 
@@ -177,7 +181,7 @@ impl PlayerState {
             public_info: PublicPlayerInfo {
                 cards_in_play: vec![],
                 spells: vec![],
-                hand_size: 0 ,
+                hand_size: 0,
                 mana_pool: ManaPool::new(),
                 health: 10,
             },
@@ -203,7 +207,7 @@ pub enum FrontendPileName {
 #[derive(Type, Deserialize, Serialize, Debug, Clone)]
 pub enum FrontendTarget {
     Card(FrontendCardTarget),
-    Player(i32)
+    Player(i32),
 }
 
 #[derive(Type, Deserialize, Serialize, Debug, Clone)]
@@ -239,13 +243,13 @@ pub struct PublicPlayerInfo {
     pub cards_in_play: Vec<CardWithDetails>,
     pub spells: Vec<CardWithDetails>,
     pub mana_pool: ManaPool,
-    pub health: i8
+    pub health: i8,
 }
 
 enum PriorityActionResult {
-    NoAction,                 // Player did nothing
-    ActionRequiresRestart,    // Player performed an action that requires restarting the priority loop
-    Timeout,                  // Player did not act in time
+    NoAction,              // Player did nothing
+    ActionRequiresRestart, // Player performed an action that requires restarting the priority loop
+    Timeout,               // Player did not act in time
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -255,7 +259,7 @@ pub struct Game {
     pub current_turn: Option<Turn>,
     pub turn_number: usize,
     #[serde(skip_serializing, skip_deserializing)]
-    pub action_queue: Vec<Arc<dyn Action + Send +Sync>>,
+    pub action_queue: Vec<Arc<dyn Action + Send + Sync>>,
     #[serde(skip_serializing, skip_deserializing)]
     pub effect_manager: EffectManager,
     #[serde(skip_serializing, skip_deserializing)]
@@ -291,32 +295,49 @@ impl Game {
         for (player_index, player) in self.players.iter().enumerate() {
             for (card_index, card) in player.clone().lock().await.cards_in_hand.iter().enumerate() {
                 if Arc::ptr_eq(card, &arc) {
-                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Hand, player_index: player_index as i32 };
+                    return FrontendCardTarget {
+                        card_index: card_index as i32,
+                        pile: FrontendPileName::Hand,
+                        player_index: player_index as i32,
+                    };
                 }
             }
             for (card_index, card) in player.clone().lock().await.spells.iter().enumerate() {
                 if Arc::ptr_eq(card, &arc) {
-                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Spell, player_index: player_index as i32 };
+                    return FrontendCardTarget {
+                        card_index: card_index as i32,
+                        pile: FrontendPileName::Spell,
+                        player_index: player_index as i32,
+                    };
                 }
             }
             for (card_index, card) in player.clone().lock().await.cards_in_play.iter().enumerate() {
                 if Arc::ptr_eq(card, &arc) {
-                    return FrontendCardTarget { card_index: card_index as i32, pile: FrontendPileName::Play, player_index: player_index as i32 };
+                    return FrontendCardTarget {
+                        card_index: card_index as i32,
+                        pile: FrontendPileName::Play,
+                        player_index: player_index as i32,
+                    };
                 }
             }
         }
 
-        FrontendCardTarget {card_index: 0, pile: FrontendPileName::Hand, player_index: 0 }
+        FrontendCardTarget {
+            card_index: 0,
+            pile: FrontendPileName::Hand,
+            player_index: 0,
+        }
     }
 
-    pub async fn frontend_target_from_effect_target(&self, target: &EffectTarget) -> FrontendTarget {
+    pub async fn frontend_target_from_effect_target(
+        &self,
+        target: &EffectTarget,
+    ) -> FrontendTarget {
         match target {
-            EffectTarget::Player(arc) => {
-                FrontendTarget::Player(0)
-            },
+            EffectTarget::Player(arc) => FrontendTarget::Player(0),
             EffectTarget::Card(arc) => {
                 FrontendTarget::Card(self.frontend_target_from_card(arc).await)
-            },
+            }
         }
     }
 
@@ -347,68 +368,53 @@ impl Game {
             player.reset_spells();
         }
 
-        self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
+        self.effect_manager
+            .apply_effects(self.current_turn.clone().unwrap())
+            .await;
     }
 
-    pub async fn detach_cards_from(&mut self, card: &Arc<Mutex<Card>>) {
-        let mut actions = vec![];
-        let mut detach_list = vec![];
+    pub async fn remove_references_to(&mut self, card: &Arc<Mutex<Card>>) {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
 
+        for player_arc in self.players.clone() {
+            let player = player_arc.lock().await;
 
-        for player_arc in &self.players {
-            let (player_name, card_indices_to_detach) = {
-                let player = player_arc.lock().await;
-                let mut indices = Vec::new();
+            for (index, card_in_play_arc) in player.cards_in_play.iter().enumerate() {
+                let should_detach = {
+                    let card_in_play = card_in_play_arc.lock().await;
 
-                for (index, card_in_play_arc) in player.cards_in_play.iter().enumerate() {
-                    let should_detach = {
-                        let card_in_play = card_in_play_arc.lock().await;
-
-                        let is_attached = if let Some(attached_arc) = &card_in_play.attached {
-                            Arc::ptr_eq(attached_arc, card)
-                        } else {
-                            false
-                        };
-
-                        let is_same_card = Arc::ptr_eq(card_in_play_arc, card);
-
-                        is_attached || is_same_card
+                    let is_attached = if let Some(attached_arc) = &card_in_play.attached {
+                        Arc::ptr_eq(attached_arc, card)
+                    } else {
+                        false
                     };
 
-                    if should_detach {
-                        indices.push(index);
-                    }
+                    let is_same_card = Arc::ptr_eq(card_in_play_arc, card);
+
+                    is_attached || is_same_card
+                };
+
+                if should_detach {
+                    self.detach_card(card_in_play_arc).await;
                 }
-
-                (player.name.clone(), indices)
-            };
-
-            if !card_indices_to_detach.is_empty() {
-                detach_list.push((player_arc.clone(), card_indices_to_detach));
             }
         }
-
-
-        for (player_arc, mut indices) in detach_list {
-
-            indices.sort_unstable_by(|a, b| b.cmp(a));
-
-            let mut player = player_arc.lock().await;
-
-            for index in indices {
-                println!("Detaching card at index {} from player {}", index, player.name);
-
-                let mut detach_actions = player.detach_card_in_play(index, self).await;
-                actions.append(&mut detach_actions);
-            }
-        }
-
 
         self.execute_actions(&mut actions).await;
     }
 
+    pub async fn detach_card(&mut self, card_arc: &Arc<Mutex<Card>>) {
+        let mut card = card_arc.lock().await;
+        if let Some(attached_card) = card.attached.take() {
+            println!("Detached card {} from \n\n{:?}", card.name, attached_card);
+            self.effect_manager
+                .remove_effects_by_source(card_arc, self.current_turn.clone().unwrap())
+                .await;
+        }
+    }
+
     pub async fn destroy_card(&mut self, card: &Arc<Mutex<Card>>) {
-        self.detach_cards_from(card).await;
+        self.remove_references_to(card).await;
         let mut actions = vec![];
         for player in self.players.iter() {
             let cards_to_destroy = {
@@ -416,7 +422,6 @@ impl Game {
 
                 let mut cards_to_destroy = Vec::new();
                 for (card_index, card_in_play) in player_locked.cards_in_play.iter().enumerate() {
-
                     if Arc::ptr_eq(card, card_in_play) {
                         cards_to_destroy.push(card_index);
                     }
@@ -427,14 +432,16 @@ impl Game {
 
             for &card_index in &cards_to_destroy {
                 let mut player_locked = player.lock().await;
-                actions.append(&mut player_locked.destroy_card_in_play(card_index, self.current_turn.as_ref().unwrap()).await);
+                actions.append(
+                    &mut player_locked
+                        .destroy_card_in_play(card_index, self.current_turn.as_ref().unwrap())
+                        .await,
+                );
             }
-
         }
 
         self.execute_actions(&mut actions).await;
     }
-
 
     pub async fn add_player(&mut self, player: Player) -> Arc<Mutex<Player>> {
         let player_arc = Arc::new(Mutex::new(player));
@@ -450,12 +457,15 @@ impl Game {
         in_play_index: usize,
         target: Option<EffectTarget>,
     ) -> Result<(), String> {
-
-        target.clone().ok_or_else(|| "Choose a target".to_string())?;
+        target
+            .clone()
+            .ok_or_else(|| "Choose a target".to_string())?;
 
         let mut actions = {
             let mut player_locked = player.lock().await;
-            player_locked.attach_card(in_play_index, target, self).await?
+            player_locked
+                .attach_card(in_play_index, target, self)
+                .await?
         };
         println!("actions {:?}", actions);
 
@@ -470,7 +480,6 @@ impl Game {
         in_play_index: usize,
         target: Option<EffectTarget>,
     ) -> Result<(), String> {
-        println!("player {:?}", player);
         if let Some((current_player, _, action_taken)) = &mut self.current_priority_player {
             if !Arc::ptr_eq(&player, current_player) {
                 return Err("Not your turn".to_string());
@@ -481,13 +490,38 @@ impl Game {
         }
         let mut actions = {
             let mut player_locked = player.lock().await;
-            player_locked.execute_action(in_play_index, target, self).await?
+            player_locked
+                .execute_action(in_play_index, target, self)
+                .await?
         };
-
 
         self.execute_actions(&mut actions).await;
 
         Ok(())
+    }
+
+    pub async fn play_token(
+        game_arc: &Arc<Mutex<Game>>, // Now passing the game Arc
+        player_arc: &Arc<Mutex<Player>>,
+        mut token: Card,
+    ) -> Result<Arc<Mutex<Card>>, String> {
+        token.owner = Some(Arc::clone(player_arc));
+        let card = Arc::new(Mutex::new(token));
+
+        let index = {
+            let mut player = player_arc.lock().await;
+            player.cards_in_hand.push(card.clone());
+            player.cards_in_hand.len() - 1
+        };
+
+        let mut game = game_arc.lock().await; // Lock the game for write access
+        let result = game.execute_card(player_arc, index, None).await?;
+        game.resolve_stack().await;
+
+        // Now pass the game Arc to process the action queue
+        // Game::process_action_queue(game_arc.clone(), result.clone()).await;
+
+        Ok(result)
     }
 
     pub async fn play_card(
@@ -495,7 +529,7 @@ impl Game {
         player: &Arc<Mutex<Player>>,
         index: usize,
         target: Option<EffectTarget>,
-    ) -> Result<(), String> {
+    ) -> Result<Arc<Mutex<Card>>, String> {
         if let Some((current_player, _, action_taken)) = &mut self.current_priority_player {
             if !Arc::ptr_eq(&player, current_player) {
                 return Err("Not your turn".to_string());
@@ -504,24 +538,35 @@ impl Game {
             }
         }
 
-        let action = {
-            Player::play_card(player, index, target.clone(), self.current_turn.clone().unwrap()).await?
+        Ok(self.execute_card(player, index, target).await?)
+    }
+
+    async fn execute_card(
+        &mut self,
+        player: &Arc<Mutex<Player>>,
+        index: usize,
+        target: Option<EffectTarget>,
+    ) -> Result<Arc<Mutex<Card>>, String> {
+        let (action, card) = {
+            Player::play_card(
+                player,
+                index,
+                target.clone(),
+                self.current_turn.clone().unwrap(),
+            )
+            .await?
         };
 
         self.add_to_stack(action);
-        self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
+        self.effect_manager
+            .apply_effects(self.current_turn.clone().unwrap())
+            .await;
         println!("Action added to stack & applied effects.");
 
-        Ok(())
+        Ok(card)
     }
 
-    pub async fn next_priority_queue(&mut self) {
-
-
-
-
-
-    }
+    pub async fn next_priority_queue(&mut self) {}
 
     pub fn send_command(&mut self, command: LobbyCommand) {
         if let Some(ref sender) = self.turn_change_sender {
@@ -536,30 +581,105 @@ impl Game {
         }
     }
 
-
     pub fn add_turn_message(&mut self, message: String) {
         self.turn_messages.push(message);
         self.messages_updated();
     }
 
+    pub async fn collect_card_played_actions(
+        &self,
+        card_arc: &Arc<Mutex<Card>>,
+    ) -> Vec<Arc<dyn Action + Send + Sync>> {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+        let owner = card_arc.lock().await.owner.clone();
+        if let Some(owner) = &owner {
+            for player in &self.players {
+                let mut cards = player.lock().await.cards_in_play.clone();
+
+                for card in &cards {
+                    let triggers = card.lock().await.triggers.clone();
+                    let target = Some(EffectTarget::Card(Arc::clone(card_arc)));
+                    for trigger in triggers {
+                        match trigger.trigger_type {
+                            ActionTriggerType::OtherCardPlayed(trigger_target) => {
+                                match &trigger_target {
+                                    TriggerTarget::Target => todo!(),
+                                    TriggerTarget::Owner => {
+                                        if Arc::ptr_eq(card, card_arc) {
+                                            continue;
+                                        }
+                                        if self
+                                            .current_turn
+                                            .as_ref()
+                                            .and_then(|x| {
+                                                Some(Arc::ptr_eq(&x.current_player, owner))
+                                            })
+                                            .unwrap_or(false)
+                                        {
+                                            actions.push(Arc::new(CardActionWrapper {
+                                                action: trigger.action,
+                                                card: Arc::clone(card),
+                                                target: target.clone(),
+                                            }));
+                                        }
+                                    }
+                                    TriggerTarget::Any => todo!(),
+                                }
+                            }
+                            ActionTriggerType::DamageApplied => {}
+                            ActionTriggerType::Attached => {}
+                            ActionTriggerType::Detached => {}
+                            ActionTriggerType::CardInPlay => {}
+                            // ActionTriggerType::CardInPlay => {
+                            //     println!("adding action for {}", card.lock().await.name);
+                            //     actions.push(Arc::new(CardActionWrapper {
+                            //         action: trigger.action,
+                            //         card: Arc::clone(card),
+                            //         target: target.clone(),
+                            //     }))
+                            // }
+                            ActionTriggerType::CardDestroyed => {}
+                            ActionTriggerType::CardTapped => {}
+                            ActionTriggerType::CardTappedWithinPhases(vec) => {}
+                            ActionTriggerType::ActionedWithinPhases(vec, vec1) => {}
+                            ActionTriggerType::PhaseStarted(vec, trigger_target) => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        actions
+    }
 
     pub async fn collect_actions_for_phase(&mut self) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions = Vec::new();
 
-        for (player_index,player) in self.players.iter().enumerate() {
-            let mut a = Player::collection_actions_for_phase(Arc::clone(player), player_index, self.current_turn.clone().unwrap()).await;
+        for (player_index, player) in self.players.iter().enumerate() {
+            let mut a = Player::collection_actions_for_phase(
+                Arc::clone(player),
+                player_index,
+                self.current_turn.clone().unwrap(),
+            )
+            .await;
             actions.append(&mut a);
 
-
             for card_rc in &player.lock().await.cards_in_play {
-
-
-                let collected_actions: Vec<Arc<dyn Action + Send + Sync>> = Card::collect_phase_based_actions(
-                    card_rc,
-                    &self.current_turn.clone().unwrap(),
-                    action::ActionTriggerType::PhaseBased(vec![self.current_phase()], TriggerTarget::Any),
-                ).await;
-                println!("Card {} had actions {:?}", card_rc.lock().await.name, collected_actions);
+                let collected_actions: Vec<Arc<dyn Action + Send + Sync>> =
+                    Card::collect_phase_based_actions(
+                        card_rc,
+                        &self.current_turn.clone().unwrap(),
+                        action::ActionTriggerType::PhaseStarted(
+                            vec![self.current_phase()],
+                            TriggerTarget::Any,
+                        ),
+                    )
+                    .await;
+                println!(
+                    "Card {} had actions {:?}",
+                    card_rc.lock().await.name,
+                    collected_actions
+                );
                 actions.extend(collected_actions);
 
                 let has_effects = self.effect_manager.has_effects(card_rc).await;
@@ -577,8 +697,7 @@ impl Game {
         actions
     }
 
-
-    pub async fn execute_actions(&mut self, actions: &mut Vec<Arc<dyn Action + Send +Sync>>) {
+    pub async fn execute_actions(&mut self, actions: &mut Vec<Arc<dyn Action + Send + Sync>>) {
         let actions_to_execute = std::mem::take(actions);
 
         for action in actions_to_execute {
@@ -586,14 +705,15 @@ impl Game {
             action.apply(self).await;
         }
 
-        self.effect_manager.apply_effects(self.current_turn.clone().unwrap()).await;
+        self.effect_manager
+            .apply_effects(self.current_turn.clone().unwrap())
+            .await;
     }
 
     pub fn reset_turn_messages(&mut self) {
         self.turn_messages = vec![];
         self.messages_updated();
     }
-
 
     pub async fn start_turn(&mut self, player_index: usize) {
         self.reset_turn_messages();
@@ -607,15 +727,21 @@ impl Game {
 
         self.reset_creature_damage().await;
 
+        for player in &self.players {
+            let mut player = player.lock().await;
+            player.health_at_start_of_round = player.stat_manager.get_stat_value(StatType::Health);
+        }
 
         let player_arc = self.players[player_index].clone();
         {
             let mut player = player_arc.lock().await;
             player.advance_card_phases().await;
         }
-
-
-        let player = self.players[player_index].lock().await;
+    }
+    pub async fn print(&self) {
+        let player = self.players[self.current_turn.clone().unwrap().current_player_index as usize]
+            .lock()
+            .await;
         println!(
             "{}'s turn: ------\n{}",
             player.name,
@@ -623,9 +749,7 @@ impl Game {
         );
     }
 
-
     pub async fn handle_deaths(&mut self) {
-
         let mut alive_players = Vec::new();
 
         for player_arc in &self.players {
@@ -639,31 +763,33 @@ impl Game {
             }
         }
 
-
         self.players = alive_players;
-
-
     }
-
 
     pub async fn execute_player_action(
         &mut self,
         player_arc: Arc<Mutex<Player>>,
         action: Arc<dyn Action + Send + Sync>,
     ) -> Result<(), String> {
-
         action.apply(self).await;
 
         Ok(())
     }
 
-    pub fn get_players_in_priority_order(&self, starting_player: &Arc<Mutex<Player>>) -> Vec<Arc<Mutex<Player>>> {
+    pub fn get_players_in_priority_order(
+        &self,
+        starting_player: &Arc<Mutex<Player>>,
+    ) -> Vec<Arc<Mutex<Player>>> {
         let mut players_in_order = Vec::new();
 
         // Ensure there are players in the game
         if !self.players.is_empty() {
             // Find the index of the starting player
-            if let Some(starting_index) = self.players.iter().position(|p| Arc::ptr_eq(p, starting_player)) {
+            if let Some(starting_index) = self
+                .players
+                .iter()
+                .position(|p| Arc::ptr_eq(p, starting_player))
+            {
                 let num_players = self.players.len();
 
                 // Start from the next player after the starting_player
@@ -679,15 +805,22 @@ impl Game {
         players_in_order
     }
 
-
     pub async fn wait_for_player_action_async(
-        game_arc: Arc<RwLock<Game>>,
+        game_arc: Arc<Mutex<Game>>,
         initial_time_limit: i8,
     ) -> PriorityActionResult {
         let sleep_duration = Duration::from_millis(100);
         let mut deadline = Instant::now() + Duration::from_secs(initial_time_limit as u64);
         let mut time_since_last_notification = Duration::from_secs(0);
-        let current_player = Arc::clone(&game_arc.read().await.current_priority_player.clone().unwrap().0);
+        let current_player = Arc::clone(
+            &game_arc
+                .lock()
+                .await
+                .current_priority_player
+                .clone()
+                .unwrap()
+                .0,
+        );
 
         loop {
             if Instant::now() >= deadline {
@@ -698,7 +831,7 @@ impl Game {
             // The player remains the same during their priority turn
 
             let action_performed = {
-                let mut game = game_arc.write().await;
+                let mut game = game_arc.lock().await;
                 match game.performed_action() {
                     ActionType::PlayedCard => {
                         println!("Player performed an action requiring priority loop restart.");
@@ -712,25 +845,24 @@ impl Game {
 
                         // game.reset_performed_action();
                         return PriorityActionResult::ActionRequiresRestart;
-                    },
+                    }
                     ActionType::None => {
                         // No action performed
-                    },
+                    }
                     x => {
                         println!("Player performed an action {:?}, resetting timer.", x);
-                            if let Some((_, _, action)) = &mut game.current_priority_player {
-                                *action = ActionType::None;
-                            }
-
+                        if let Some((_, _, action)) = &mut game.current_priority_player {
+                            *action = ActionType::None;
+                        }
 
                         deadline = Instant::now() + Duration::from_secs(15);
-                    },
+                    }
                 }
             };
 
             let time_left = deadline.saturating_duration_since(Instant::now()).as_secs();
             {
-                let mut game = game_arc.write().await;
+                let mut game = game_arc.lock().await;
                 if let Some((_, tl, _)) = &mut game.current_priority_player {
                     *tl = time_left as i8;
                 }
@@ -742,7 +874,7 @@ impl Game {
                 time_since_last_notification = Duration::from_secs(0);
 
                 let sender = {
-                    let game = game_arc.read().await;
+                    let game = game_arc.lock().await;
                     game.turn_change_sender.clone()
                 };
 
@@ -755,18 +887,16 @@ impl Game {
         }
     }
 
-
-    pub  fn performed_action(&self) -> ActionType {
+    pub fn performed_action(&self) -> ActionType {
         if let Some((_, _, action)) = &self.current_priority_player {
             return action.clone();
         }
         ActionType::None
     }
 
-    pub async fn priority_loop(game_arc: Arc<RwLock<Game>>, source_card_arc: Arc<Mutex<Card>>) {
-
+    pub async fn priority_loop(game_arc: Arc<Mutex<Game>>, source_card_arc: Arc<Mutex<Card>>) {
         let mut players_in_order = {
-            let mut game = game_arc.write().await;
+            let mut game = game_arc.lock().await;
             game.debug("Entering priority loop");
             game.get_players_in_priority_order(&source_card_arc.lock().await.owner.clone().unwrap())
         };
@@ -789,8 +919,9 @@ impl Game {
                 let time_limit = if i == 0 { 3 } else { 3 };
 
                 {
-                    let mut game = game_arc.write().await;
-                    game.current_priority_player = Some((player_arc.clone(), time_limit.clone(), ActionType::None));
+                    let mut game = game_arc.lock().await;
+                    game.current_priority_player =
+                        Some((player_arc.clone(), time_limit.clone(), ActionType::None));
 
                     if let Some(ref sender) = game.turn_change_sender {
                         let _ = sender.send(None);
@@ -805,22 +936,25 @@ impl Game {
                         println!("Player performed an action requiring priority loop restart.");
                         // Restart the priority loop from the player who performed the action
                         players_in_order = {
-                            let game = game_arc.read().await;
+                            let game = game_arc.lock().await;
                             game.get_players_in_priority_order(player_arc)
                         };
                         // Reset passed players
                         passed_players = vec![false; players_in_order.len()];
                         // Start the loop again
                         break;
-                    },
+                    }
                     PriorityActionResult::Timeout => {
-                        println!("{} did not act in time, passing.", player_arc.lock().await.name);
+                        println!(
+                            "{} did not act in time, passing.",
+                            player_arc.lock().await.name
+                        );
                         passed_players[i] = true;
-                    },
+                    }
                     PriorityActionResult::NoAction => {
                         println!("{} passed without action.", player_arc.lock().await.name);
                         passed_players[i] = true;
-                    },
+                    }
                 }
 
                 {
@@ -833,7 +967,7 @@ impl Game {
                 println!("All players have passed. Exiting priority loop.");
 
                 {
-                    let game = game_arc.read().await;
+                    let game = game_arc.lock().await;
                     if let Some(ref sender) = game.turn_change_sender {
                         let _ = sender.send(None);
                     }
@@ -844,31 +978,31 @@ impl Game {
         }
 
         {
-            let mut game = game_arc.write().await;
+            let mut game = game_arc.lock().await;
             game.current_priority_player = None;
         }
     }
 
-    pub async fn process_action_queue(game_arc: Arc<RwLock<Game>>, card_arc: Arc<Mutex<Card>>) {
-        let card = {
-
-            card_arc.lock().await.clone()
-        };
+    pub async fn process_action_queue(game_arc: Arc<Mutex<Game>>, card_arc: Arc<Mutex<Card>>) {
+        let card = { card_arc.lock().await.clone() };
 
         if card.card_type.is_spell() {
             {
-                let mut game = game_arc.write().await;
-                game.add_turn_message(format!("{} is casting {}", card.owner.unwrap().lock().await.name, card.name));
+                let mut game = game_arc.lock().await;
+                game.add_turn_message(format!(
+                    "{} is casting {}",
+                    card.owner.unwrap().lock().await.name,
+                    card.name
+                ));
             }
-
 
             Self::priority_loop(Arc::clone(&game_arc), card_arc).await;
         }
 
-        let mut game = game_arc.write().await;
+        let mut game = game_arc.lock().await;
 
+        println!("resolving stack");
         game.resolve_stack().await;
-
 
         if let Some(ref sender) = game.turn_change_sender {
             let _ = sender.send(None);
@@ -876,10 +1010,9 @@ impl Game {
     }
 
     pub fn messages_updated(&self) {
-
         if let Some(ref sender) = self.turn_change_sender {
             let _ = sender.send(Some(LobbyCommand::TurnMessages(LobbyTurnMessage {
-                messages: self.turn_messages.clone()
+                messages: self.turn_messages.clone(),
             })));
         }
     }
@@ -903,7 +1036,11 @@ impl Game {
             let mut actions = self.collect_actions_for_phase().await;
             self.execute_actions(&mut actions).await;
 
-            println!(":: TURN ADVANCED :: {:?} effects: {:?}", self.current_turn.clone().unwrap().phase, "");
+            println!(
+                ":: TURN ADVANCED :: {:?} effects: {:?}",
+                self.current_turn.clone().unwrap().phase,
+                ""
+            );
         }
     }
 
@@ -920,567 +1057,4 @@ impl Game {
         }
         self.start_turn(0).await;
     }
-}
-mod test {
-    use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
-
-    use tokio::sync::{Mutex, Notify};
-
-    use crate::game::{action::{ generate_mana::GenerateManaAction, ActionTriggerType, ApplyStat, CardActionTrigger, CardActionWrapper, CardRequiredTarget, CounterSpellAction, DeclareAttackerAction, DeclareBlockerAction, DestroyTargetCAction, PlayerActionTarget, PlayerActionTrigger}, card::{self, card::create_creature_card}, deck::Deck, effects::{ApplyEffectToCardBasedOnTotalCardType, ApplyEffectToPlayerCardType, ApplyEffectToTargetAction, EffectTarget, ExpireContract, StatModifierEffect}, mana::ManaType};
-
-    use super::{
-        action::{add_stat::CardAddStatAction, CardActionTarget, CardDamageAction, TriggerTarget}, card::{Card, CardPhase, CardType}, effects::{
-        }, player::Player, stat::{Stat, StatType}, turn::{Turn, TurnPhase}, Game
-    };
-
-    #[tokio::test]
-    async fn test_sorcery() {
-        let mut game = Game::new();
-        game.add_player(Player::new("tim", 20, 0, vec![
-            card::card::create_creature_card!(
-                "A wall",
-                "A brick wall",
-                1,
-                7,
-                []
-            ),
-            Card::new(
-                "Overrun",
-                "Creatures you control get +3/+3 and trample",
-                vec![
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Damage,
-                                    3,
-                                    ExpireContract::Turns(1),
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    3,
-                                    ExpireContract::Turns(1),
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Trample,
-                                    1,
-                                    ExpireContract::Turns(1),
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                ],
-                CardPhase::Ready,
-                CardType::Sorcery,
-                vec![],
-                vec![],
-            ),
-        ])).await;
-
-        game.start_turn(0).await;
-
-        let player = Arc::clone(&game.players[0]);
-        player.lock().await.draw_card();
-        player.lock().await.draw_card();
-        game.play_card(&player, 1, None).await.unwrap();
-
-
-
-
-
-
-        game.play_card(&player, 0, None).await.unwrap();
-        println!("{}", player.lock().await.render(30, 10, 30).await);
-
-        for _ in 0..15 {
-        game.advance_turn().await;
-        }
-
-    }
-
-
-    #[tokio::test]
-    async fn test_counter() {
-        let mut game = Game::new();
-
-
-        game.add_player(Player::new("tim", 20, 0, vec![
-            card::card::create_creature_card!(
-                "A wall",
-                "A brick wall",
-                1,
-                7,
-                []
-            ),
-        ])).await;
-
-        game.add_player(Player::new("tim troll", 20, 0, vec![
-            Card::new(
-                "Counter Spell",
-                "Counter target spell.",
-                vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::Spell,
-                    Arc::new(CounterSpellAction {}),
-                )],
-                CardPhase::Ready,
-                CardType::Instant,
-                vec![],
-                vec![],
-            ),
-        ])).await;
-
-
-        game.start_turn(0).await;
-
-
-        let player = Arc::clone(&game.players[0]);
-        let troll = Arc::clone(&game.players[1]);
-        player.lock().await.draw_card();
-        troll.lock().await.draw_card();
-
-            let target_card = {
-                let card = &player.lock().await.cards_in_hand[0];
-                Arc::clone(card)
-            };
-
-        game.play_card( &player, 0, None).await.unwrap();
-
-
-
-
-
-
-
-
-
-        let troll_clone = Arc::clone(&troll);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        println!("{}", player.lock().await.render(30, 10, 30).await);
-    }
-
-    #[tokio::test]
-    async fn test_enchantments() {
-        let mut game = Game::new();
-        game.add_player(Player::new("tim", 20, 0, vec![
-            card::card::create_creature_card!(
-                "A wall",
-                "A brick wall",
-                1,
-                7,
-                [ManaType::Green]
-            ),
-            Card::new(
-                "Rancor",
-                "Enchanted creature gets +2/+0 and trample",
-                vec![
-                    CardActionTrigger::new(
-                        ActionTriggerType::Attached,
-                        CardRequiredTarget::CardOfType(CardType::Creature),
-                        Arc::new(ApplyEffectToTargetAction {
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Trample,
-                                    1,
-                                    ExpireContract::Never,
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Attached,
-                        CardRequiredTarget::CardOfType(CardType::Creature),
-                        Arc::new(ApplyEffectToTargetAction {
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Damage,
-                                    2,
-                                    ExpireContract::Never,
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                ],
-                CardPhase::Ready,
-                CardType::Enchantment,
-                vec![],
-                vec![],
-            ),
-        ])).await;
-
-        game.start_turn(0).await;
-
-        let creature_card = game.players[0].lock().await.deck.draw_pile.remove(0);
-        let enchantment = game.players[0].lock().await.deck.draw_pile.remove(0);
-        let player = Arc::clone(&game.players[0]);
-        player.lock().await.cards_in_play.push(Arc::clone(&creature_card));
-        player.lock().await.cards_in_hand.push(enchantment);
-
-        game.play_card( &player, 0, None).await.unwrap();
-        let target = Some(EffectTarget::Card(creature_card));
-        game.attach_card_action(&player, 1, target).await.unwrap();
-        println!("{}", player.lock().await.render(30, 10, 30).await);
-
-    }
-
-    #[tokio::test]
-    async fn test() {
-
-
-        let mut game = Game::new();
-
-        game.add_player(
-            Player::new(
-                "Player 1",
-                100,
-                5,
-                vec![
-                    card::card::create_creature_card!(
-                        "A wall",
-                        "A brick wall",
-                        1,
-                        7,
-                        [ManaType::Black]
-                    ),
-                    Card::new(
-                        "Buff",
-                        "Adds 1 damage stat to a card",
-                        vec![
-                            CardActionTrigger::new(
-                                ActionTriggerType::Instant,
-                                CardRequiredTarget::CardOfType(CardType::Creature),
-                                Arc::new(ApplyEffectToTargetAction {
-                                    effect_generator: Arc::new(|target, source_card| {
-                                        let effect = StatModifierEffect::new(target, StatType::Damage, 1, ExpireContract::Never, source_card);
-                                        Arc::new(Mutex::new(effect))
-                                    }),
-                                }),
-                            ),
-                        ],
-                        CardPhase::Ready,
-                        CardType::Enchantment,
-                        vec![],
-                        vec![ManaType::Black],
-                    ),
-                    Card::new(
-                        "Poison",
-                        "Applies 2 damage for the next 3 turns after 1 turn.",
-                        vec![
-                            CardActionTrigger::new(ActionTriggerType::PhaseBased(vec![TurnPhase::Upkeep], TriggerTarget::Target),
-                                CardRequiredTarget::EnemyPlayer,
-                                Arc::new(CardDamageAction {
-                                })
-                            )
-                        ],
-                        CardPhase::Charging(1),
-                        CardType::Artifact,
-                        vec![Stat::new(StatType::Damage, 2)],
-                        vec![ManaType::Black]
-                    ),
-
-                    Card::new(
-                        "Swamp",
-                        "TAP: Adds 1 Swamp mana to your pool",
-                        vec![
-                            CardActionTrigger::new(ActionTriggerType::Tap,
-                                CardRequiredTarget::None,
-                             Arc::new(GenerateManaAction {
-                                mana_to_add: vec![ManaType::Black],
-                                target: PlayerActionTarget::SelfPlayer,
-                            })),
-                        ],
-                        CardPhase::Ready,
-                        CardType::BasicLand(ManaType::Black),
-                        vec![],
-                        vec![]
-                    ),
-                ],
-            )
-        ).await;
-        game.add_player(Player::new("Player 2", 100, 5, vec![
-            Card::new(
-                "Overrun",
-                "Creatures you control get +3/+3 and trample",
-                vec![
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Damage,
-                                    3,
-                                    ExpireContract::Never,
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    3,
-                                    ExpireContract::Never,
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                    CardActionTrigger::new(
-                        ActionTriggerType::Instant,
-                        CardRequiredTarget::None,
-                        Arc::new(ApplyEffectToPlayerCardType {
-                            card_type: CardType::Creature,
-                            effect_generator: Arc::new(|target, source_card| {
-                                let effect = StatModifierEffect::new(
-                                    target,
-                                    StatType::Trample,
-                                    1,
-                                    ExpireContract::Turns(1),
-                                    source_card,
-                                );
-                                Arc::new(Mutex::new(effect))
-                            }),
-                        }),
-                    ),
-                ],
-                CardPhase::Ready,
-                CardType::Sorcery,
-                vec![],
-                vec![ManaType::Blue],
-            ),
-
-            create_creature_card!(
-                "Kalonian Tusker",
-                "Big creature with raw power",
-                6,
-                1,
-                [ManaType::White, ManaType::Blue]
-            ),
-
-            Card::new(
-                "Plains",
-                "TAP: Adds 1 white mana to your pool",
-                vec![
-                    CardActionTrigger::new(ActionTriggerType::Tap,
-                        CardRequiredTarget::None,
-                    Arc::new(GenerateManaAction {
-                        mana_to_add: vec![ManaType::White],
-                        target: PlayerActionTarget::SelfPlayer,
-                    })),
-                ],
-                CardPhase::Ready,
-                CardType::BasicLand(ManaType::White),
-                vec![],
-                vec![]
-            ),
-
-            Card::new(
-                "Destroy",
-                "Destroy target card",
-                vec![
-                            CardActionTrigger::new(ActionTriggerType::Instant, CardRequiredTarget::AnyCard,
-                                Arc::new(DestroyTargetCAction {})
-                            )
-                ],
-                CardPhase::Charging(1),
-                CardType::Instant,
-                vec![Stat::new(StatType::Damage, 1)],
-                vec![ManaType::Blue]
-            ),
-
-
-            Card::new(
-                "Island",
-                "TAP: Adds 1 blue mana to your pool",
-                vec![
-                    CardActionTrigger::new(ActionTriggerType::Tap, CardRequiredTarget::None, Arc::new(GenerateManaAction {
-                        mana_to_add: vec![ManaType::Blue],
-                        target: PlayerActionTarget::SelfPlayer,
-                    })),
-                ],
-                CardPhase::Ready,
-                CardType::BasicLand(ManaType::Blue),
-                vec![],
-                vec![]
-            ),
-        ])).await;
-
-
-
-        game.start_turn(0).await;
-        for _ in 0..23 {
-            game.advance_turn().await;
-        }
-
-
-        let player = &game.players[0].clone();
-        let player2 = &game.players[1].clone();
-        let posion_target = EffectTarget::Player(Arc::clone(player2));
-        game.play_card( player, 0, None).await.expect("oh no, no mana?");
-        for _ in 0..25 {
-            game.advance_turn().await;
-        }
-
-
-
-        println!("{}", player.lock().await.render(30, 10, 30).await);
-        game.play_card( player, 0, Some(posion_target)).await.expect("oh no, no mana?");
-
-        for _ in 0..15 {
-            game.advance_turn().await;
-        }
-
-        let target_card = {
-            let card = &player.lock().await.cards_in_play[1];
-            Arc::clone(card)
-        };
-
-
-        game.play_card( player, 0, Some(EffectTarget::Card(target_card))).await.expect("oh no");
-        for _ in 0..25 {
-            game.advance_turn().await;
-        }
-        game.play_card( player2, 0, None).await.expect("oh no");
-
-        let target_card = {
-            let card = &player.lock().await.cards_in_play[2];
-            Arc::clone(card)
-        };
-
-
-        for _ in 0..25 {
-            game.advance_turn().await;
-        }
-
-
-        game.play_card( player2, 0, None).await.expect("oh no");
-
-
-
-
-
-        game.play_card( player2, 0, None).await.expect("oh no");
-
-        for _ in 0..22 {
-            game.advance_turn().await;
-        }
-        println!("Declaring attackers....");
-        game.activate_card_action(player2, 2, Some(EffectTarget::Player(Arc::clone(player)))).await.expect("hmmmmm?");
-        for _ in 0..8 {
-            game.advance_turn().await;
-        }
-
-        game.play_card( player, 0, None).await.expect("hmm");
-        for _ in 0..10 {
-            game.advance_turn().await;
-        }
-
-        game.play_card( player2, 0, None).await.expect("nice");
-
-        game.advance_turn().await;
-        game.advance_turn().await;
-        game.activate_card_action(player2, 2, Some(EffectTarget::Player(Arc::clone(player)))).await.expect("hmmmmm?");
-        game.advance_turn().await;
-        let target_card = {
-            let card = &player2.lock().await.cards_in_play[2];
-            Arc::clone(card)
-        };
-        game.activate_card_action(player, 2, Some(EffectTarget::Card(target_card))).await.expect("hmmmmm?");
-        for _ in 0..24 {
-            game.advance_turn().await;
-        }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    }
-
 }

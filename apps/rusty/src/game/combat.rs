@@ -5,9 +5,10 @@ use super::{
     player::Player,
     Game,
 };
-use crate::game::stat::{StatType, Stats};
+use crate::game::stat::{Stat, StatType, Stats};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use ulid::Ulid;
 
 #[derive(Debug, Default)]
 pub struct Combat {
@@ -42,12 +43,12 @@ impl Combat {
         for (blocking_card_arc, attacker_card_arc) in &self.blockers {
             let attacker_damage = {
                 let attacker_card = attacker_card_arc.lock().await;
-                attacker_card.get_stat_value(StatType::Damage)
+                attacker_card.get_stat_value(StatType::Power)
             };
 
             let blocker_toughness = {
                 let blocker_card = blocking_card_arc.lock().await;
-                blocker_card.get_stat_value(StatType::Defense)
+                blocker_card.get_stat_value(StatType::Toughness)
             };
 
             // Apply damage to the blocker
@@ -72,11 +73,11 @@ impl Combat {
             {
                 let blocker_damage = {
                     let blocker_card = blocking_card_arc.lock().await;
-                    blocker_card.get_stat_value(StatType::Damage)
+                    blocker_card.get_stat_value(StatType::Power)
                 };
                 let attacker_toughness = {
                     let attacker_card = attacker_card_arc.lock().await;
-                    attacker_card.get_stat_value(StatType::Defense)
+                    attacker_card.get_stat_value(StatType::Toughness)
                 };
                 let mut attacker_card = attacker_card_arc.lock().await;
                 attacker_card.damage_taken += blocker_damage;
@@ -106,7 +107,7 @@ impl Combat {
                     is_blocked = true;
                     let blocker_toughness = {
                         let blocker_card = blocking_card_arc.lock().await;
-                        blocker_card.get_stat_value(StatType::Defense)
+                        blocker_card.get_stat_value(StatType::Toughness)
                     };
                     total_blocker_toughness += blocker_toughness;
                 }
@@ -114,7 +115,7 @@ impl Combat {
 
             let attacker_damage = {
                 let attacker_card = attacker_card_arc.lock().await;
-                attacker_card.get_stat_value(StatType::Damage)
+                attacker_card.get_stat_value(StatType::Power)
             };
 
             // Handle unblocked attackers
@@ -153,7 +154,13 @@ impl Combat {
         match target {
             EffectTarget::Player(player_arc) => {
                 let mut player = player_arc.lock().await;
-                player.modify_stat(StatType::Health, -damage);
+                let id = format!(
+                    "damage-{}-{}",
+                    attacker_card_arc.lock().await.name,
+                    // self.attackers.first().unwrap().0.lock().await.name
+                    Ulid::new()
+                );
+                player.add_stat(id, Stat::new(StatType::Health, -damage));
                 {
                     attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
                 }
@@ -168,7 +175,7 @@ impl Combat {
             }
             EffectTarget::Card(card_arc) => {
                 let mut card = card_arc.lock().await;
-                let toughness = card.get_stat_value(StatType::Defense);
+                let toughness = card.get_stat_value(StatType::Toughness);
                 card.damage_taken += damage;
                 println!(
                     "Attacker {} deals {} damage to card {}",

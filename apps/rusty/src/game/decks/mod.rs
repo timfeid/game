@@ -1,3 +1,5 @@
+pub mod angels;
+
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::borrow::BorrowMut;
@@ -6,18 +8,20 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::vec::Vec;
 use tokio::sync::Mutex;
+use ulid::Ulid;
 
 use crate::game::action::generate_mana::GenerateManaAction;
 use crate::game::action::{
-    ActionTriggerType, CardActionTarget, CardActionTrigger, CardRequiredTarget, CounterSpellAction,
-    DrawCardAction, PlayerActionTarget, ReturnToHandAction, TriggerTarget,
+    ActionTriggerType, AsyncClosureAction, AsyncClosureWithCardAction, CardActionTarget,
+    CardActionTrigger, CardRequiredTarget, CounterSpellAction, DrawCardAction, PlayerActionTarget,
+    ReturnToHandAction, TriggerTarget,
 };
 use crate::game::card::card::create_creature_card;
-use crate::game::card::{CardPhase, CardType};
+use crate::game::card::{CardPhase, CardType, CreatureType};
 use crate::game::effects::{
     ApplyDynamicEffectToCard, ApplyEffectToCardBasedOnTotalCardType, ApplyEffectToPlayerCardType,
-    ApplyEffectToTargetAction, DrawCardCardAction, DynamicStatModifierEffect, Effect, EffectTarget,
-    ExpireContract, LifeLinkAction, StatModifierEffect,
+    ApplyEffectToTargetAction, DrawCardCardAction, DynamicStatModifierEffect, Effect, EffectID,
+    EffectTarget, ExpireContract, LifeLinkAction, StatModifierEffect,
 };
 use crate::game::mana::ManaType;
 use crate::game::stat::{StatType, Stats};
@@ -26,6 +30,7 @@ use crate::game::action::{DeclareAttackerAction, DeclareBlockerAction};
 use crate::game::card::Card;
 use crate::game::stat::Stat;
 use crate::game::turn::TurnPhase;
+use crate::game::Game;
 
 use super::player::Player;
 
@@ -96,94 +101,118 @@ impl Deck {
             // 12 Blue Creatures
             create_creature_card!(
                 "Sapphire Adept",
+                CreatureType::None,
                 "Adept in manipulating water magic.",
                 1,
                 1,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Mystic Apprentice",
+                CreatureType::None,
                 "Learns spells as the game progresses.",
                 1,
                 1,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Illusionary Phantasm",
+                CreatureType::None,
                 "A creature that's hard to hit.",
                 2,
                 3,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Wind Weaver",
+                CreatureType::None,
                 "Can tap to draw a card.",
                 1,
                 2,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Spellcaster Adept",
+                CreatureType::None,
                 "Boosts your spells' effectiveness.",
                 2,
                 2,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Aether Sprite",
+                CreatureType::None,
                 "Has flying and evades ground creatures.",
                 1,
                 1,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Tidal Elemental",
+                CreatureType::None,
                 "Can return a creature to its owner's hand.",
                 3,
                 3,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Mind Manipulator",
+                CreatureType::None,
                 "Can control an opponent's creature temporarily.",
                 2,
                 2,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Sea Serpent",
+                CreatureType::None,
                 "A powerful creature from the depths.",
                 5,
                 5,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Arcane Scholar",
+                CreatureType::None,
                 "Draws an extra card each turn.",
                 1,
                 3,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Frost Titan",
+                CreatureType::None,
                 "Freezes enemy creatures when it attacks.",
                 6,
                 6,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             create_creature_card!(
                 "Master of Waves",
+                CreatureType::None,
                 "Boosts other blue creatures.",
                 2,
                 1,
-                [ManaType::Blue]
+                [ManaType::Blue],
+                []
             ),
             // 12 Islands (Lands)
             Card::new(
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -199,7 +228,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -215,7 +244,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -231,7 +260,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -247,7 +276,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -263,7 +292,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -279,7 +308,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -295,7 +324,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -311,7 +340,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -327,7 +356,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -343,7 +372,7 @@ impl Deck {
                 "Island",
                 "TAP: Adds 1 blue mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Blue],
@@ -360,7 +389,7 @@ impl Deck {
                 "Counter Spell",
                 "Counter target spell.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::Spell,
                     Arc::new(CounterSpellAction {}),
                 )],
@@ -373,7 +402,7 @@ impl Deck {
                 "Counter Spell",
                 "Counter target spell.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::Spell,
                     Arc::new(CounterSpellAction {}),
                 )],
@@ -386,7 +415,7 @@ impl Deck {
                 "Counter Spell",
                 "Counter target spell.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::Spell,
                     Arc::new(CounterSpellAction {}),
                 )],
@@ -399,7 +428,7 @@ impl Deck {
                 "Counter Spell",
                 "Counter target spell.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::Spell,
                     Arc::new(CounterSpellAction {}),
                 )],
@@ -412,7 +441,7 @@ impl Deck {
                 "Counter Spell",
                 "Counter target spell.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::Spell,
                     Arc::new(CounterSpellAction {}),
                 )],
@@ -425,7 +454,7 @@ impl Deck {
                 "Unsummon",
                 "Return target creature to its owner's hand.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::CardOfType(CardType::Creature),
                     Arc::new(ReturnToHandAction {}),
                 )],
@@ -439,14 +468,14 @@ impl Deck {
                 "Draw two cards.",
                 vec![
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(DrawCardCardAction {
                             target: CardActionTarget::SelfOwner,
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(DrawCardCardAction {
                             target: CardActionTarget::SelfOwner,
@@ -503,7 +532,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -521,7 +550,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -538,15 +567,17 @@ impl Deck {
             ),
             create_creature_card!(
                 "Voracious Hydra",
+                CreatureType::None,
                 "Hydra that grows with X mana",
                 0,
                 1,
                 [ManaType::Black],
+                [],
                 CardActionTrigger::new(
-                    ActionTriggerType::Instant,
+                    ActionTriggerType::CardInPlay,
                     CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
+                    Arc::new(ApplyDynamicEffectToCard::new(
+                         Arc::new(
                             move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
                                 Box::pin(async move {
                                     let mut total = 0;
@@ -565,41 +596,49 @@ impl Deck {
                                 })
                             },
                         ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
+                         Arc::new(
+                        move |target, source_card, amount, effect_id| -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>> {
+                            Box::pin(async move {
+
 
                                 let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
+                                let mut effect = DynamicStatModifierEffect::new(
                                     target.clone(),
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount.clone(),
                                     ExpireContract::Never,
                                     Some(source_card.clone()),
                                     false,
                                 );
+
+                                let id = format!("{}-{}-power",source_card.clone().lock().await.id, effect_id);
+                                effect.id = EffectID(id);
                                 effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
+                                let mut effect = DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount,
                                     ExpireContract::Never,
-                                    Some(source_card),
+                                    Some(source_card.clone()),
                                     false,
                                 );
+                                let id = format!("{}-{}-toughness",source_card.clone().lock().await.id, effect_id);
+                                effect.id = EffectID(id);
                                 effects.push(Arc::new(Mutex::new(effect)));
 
                                 effects
+                            })
                             },
 
                         ),
-                    }),
+                    )),
                 )
             ),
             Card::new(
                 "Swamp",
                 "TAP: Adds 1 black mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Black],
@@ -615,7 +654,7 @@ impl Deck {
                 "Swamp",
                 "TAP: Adds 1 black mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Black],
@@ -631,7 +670,7 @@ impl Deck {
                 "Swamp",
                 "TAP: Adds 1 black mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Black],
@@ -647,7 +686,7 @@ impl Deck {
                 "Swamp",
                 "TAP: Adds 1 black mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Black],
@@ -663,7 +702,7 @@ impl Deck {
                 "Swamp",
                 "TAP: Adds 1 black mana to your pool.",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Black],
@@ -677,13 +716,15 @@ impl Deck {
             ),
             create_creature_card!(
                 "Vengeful Spirit",
+                CreatureType::None,
                 "When Vengeful Spirit deals combat damage to a player, you gain that much life.",
                 3, // Damage
                 2, // Defense
                 [ManaType::Black],
+                [],
                 // Additional Trigger: Life Drain on Combat Damage
                 CardActionTrigger::new(
-                    ActionTriggerType::PhaseBased(vec![TurnPhase::CombatDamage], TriggerTarget::Owner),
+                    ActionTriggerType::PhaseStarted(vec![TurnPhase::CombatDamage], TriggerTarget::Owner),
                     CardRequiredTarget::None,
                     Arc::new(LifeLinkAction {})
                 )
@@ -694,431 +735,174 @@ impl Deck {
     pub fn create_green_deck() -> Vec<Card> {
         vec![
             // 12 Green Creatures
-            create_creature_card!("Llanowar Elves", "", 1, 1, [ManaType::Green]),
-            create_creature_card!("Elvish Mystic", "", 1, 1, [ManaType::Green]),
+            create_creature_card!(
+                "Llanowar Elves",
+                CreatureType::None,
+                "",
+                1,
+                1,
+                [ManaType::Green],
+                []
+            ),
+            create_creature_card!(
+                "Elvish Mystic",
+                CreatureType::None,
+                "",
+                1,
+                1,
+                [ManaType::Green],
+                []
+            ),
             create_creature_card!(
                 "Kalonian Tusker",
+                CreatureType::None,
                 "Big creature with raw power",
                 3,
                 3,
-                [ManaType::Green]
-            ),
-
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
                 [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
-
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
-
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-
-                                effects
-                            },
-
-                        ),
-                    }),
-                )
+                []
             ),
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
-                [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
+            // create_creature_card!(
+            //     "Voracious Hydra",
+            //     CreatureType::None,
+            //     "Hydra that grows with X mana",
+            //     0,
+            //     1,
+            //     [ManaType::Green],
+            //     [],
+            //     CardActionTrigger::new(
+            //         ActionTriggerType::CardInPlay,
+            //         CardRequiredTarget::None,
+            //         Arc::new(ApplyDynamicEffectToCard {
+            //             id: "test".to_string(),
+            //             amount_calculator: Arc::new(
+            //                 move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
+            //                     Box::pin(async move {
+            //                         let mut total = 0;
 
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
+            //                         // Lock the card to get the owner
+            //                         let owner = {
+            //                             let card = card_arc.lock().await;
+            //                             card.owner.clone()
+            //                         };
 
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
+            //                         if let Some(owner_arc) = owner {
+            //                             let owner = owner_arc.lock().await;
+            //                             total = owner.mana_pool.total();
+            //                         }
+            //                         total as i8
+            //                     })
+            //                 },
+            //             ),
+            //             effects_generator: Arc::new(
+            //             move |target, source_card, amount, effect_id| -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>> {
+            //                     Box::pin(async move {
 
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
+            //                     let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+            //                     let effect = DynamicStatModifierEffect::new(
+            //                         target.clone(),
+            //                         StatType::Power,
+            //                         amount.clone(),
+            //                         ExpireContract::Never,
+            //                         Some(source_card.clone()),
+            //                         false,
+            //                     );
+            //                     effects.push(Arc::new(Mutex::new(effect)));
+            //                     let effect = DynamicStatModifierEffect::new(
+            //                         target,
+            //                         StatType::Toughness,
+            //                         amount,
+            //                         ExpireContract::Never,
+            //                         Some(source_card),
+            //                         false,
+            //                     );
+            //                     effects.push(Arc::new(Mutex::new(effect)));
 
-                                effects
-                            },
+            //                     effects
+            //                     })
+            //                 },
 
-                        ),
-                    }),
-                )
-            ),
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
-                [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
-
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
-
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-
-                                effects
-                            },
-
-                        ),
-                    }),
-                )
-            ),
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
-                [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
-
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
-
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-
-                                effects
-                            },
-
-                        ),
-                    }),
-                )
-            ),
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
-                [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
-
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
-
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-
-                                effects
-                            },
-
-                        ),
-                    }),
-                )
-            ),
-            create_creature_card!(
-                "Voracious Hydra",
-                "Hydra that grows with X mana",
-                0,
-                1,
-                [ManaType::Green],
-                CardActionTrigger::new(
-                    ActionTriggerType::Instant,
-                    CardRequiredTarget::None,
-                    Arc::new(ApplyDynamicEffectToCard {
-                        amount_calculator: Arc::new(
-                            move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                                Box::pin(async move {
-                                    let mut total = 0;
-
-                                    // Lock the card to get the owner
-                                    let owner = {
-                                        let card = card_arc.lock().await;
-                                        card.owner.clone()
-                                    };
-
-                                    if let Some(owner_arc) = owner {
-                                        let owner = owner_arc.lock().await;
-                                        total = owner.mana_pool.total();
-                                    }
-                                    total as i8
-                                })
-                            },
-                        ),
-                        effects_generator: Arc::new(
-                            |target, source_card, owner, amount| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-
-                                let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                                let effect = DynamicStatModifierEffect::new(
-                                    target.clone(),
-                                    StatType::Damage,
-                                    amount.clone(),
-                                    ExpireContract::Never,
-                                    Some(source_card.clone()),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-                                let effect = DynamicStatModifierEffect::new(
-                                    target,
-                                    StatType::Defense,
-                                    amount,
-                                    ExpireContract::Never,
-                                    Some(source_card),
-                                    false,
-                                );
-                                effects.push(Arc::new(Mutex::new(effect)));
-
-                                effects
-                            },
-
-                        ),
-                    }),
-                )
-            ),
+            //             ),
+            //         }),
+            //     )
+            // ),
             create_creature_card!(
                 "Steel Leaf Champion",
+                CreatureType::None,
                 "Cannot be blocked by creatures with power 2 or less",
                 5,
                 4,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Wildgrowth Walker",
+                CreatureType::None,
                 "Gains life whenever you explore",
                 1,
                 3,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Bristling Boar",
+                CreatureType::None,
                 "Can't be blocked by more than one creature",
                 4,
                 3,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Pelt Collector",
+                CreatureType::None,
                 "Grows in power when other creatures enter",
                 1,
                 1,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Prized Unicorn",
+                CreatureType::None,
                 "All creatures able to block it must do so",
                 2,
                 2,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Thorn Lieutenant",
+                CreatureType::None,
                 "Gets +2/+2 when targeted",
                 2,
                 3,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Nessian Boar",
+                CreatureType::None,
                 "Must be blocked if able",
                 10,
                 6,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             create_creature_card!(
                 "Gigantosaurus",
+                CreatureType::None,
                 "Massive creature with raw power",
                 10,
                 10,
-                [ManaType::Green]
+                [ManaType::Green],
+                []
             ),
             Card::new(
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1134,7 +918,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1150,7 +934,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1166,7 +950,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1182,7 +966,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1198,7 +982,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1214,7 +998,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1230,7 +1014,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1246,7 +1030,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1262,7 +1046,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1278,7 +1062,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1294,7 +1078,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1310,7 +1094,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1326,7 +1110,7 @@ impl Deck {
                 "Forest",
                 "TAP: Adds 1 forest mana to your pool",
                 vec![CardActionTrigger::new(
-                    ActionTriggerType::Tap,
+                    ActionTriggerType::CardTapped,
                     CardRequiredTarget::None,
                     Arc::new(GenerateManaAction {
                         mana_to_add: vec![ManaType::Green],
@@ -1344,13 +1128,13 @@ impl Deck {
                 "Target creature gets +3/+3 until end of turn",
                 vec![
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::CardOfType(CardType::Creature),
                         Arc::new(ApplyEffectToTargetAction {
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1360,13 +1144,13 @@ impl Deck {
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::CardOfType(CardType::Creature),
                         Arc::new(ApplyEffectToTargetAction {
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1386,14 +1170,14 @@ impl Deck {
                 "Creatures you control get +3/+3 and trample",
                 vec![
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(ApplyEffectToPlayerCardType {
                             card_type: CardType::Creature,
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1403,14 +1187,14 @@ impl Deck {
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(ApplyEffectToPlayerCardType {
                             card_type: CardType::Creature,
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1420,7 +1204,7 @@ impl Deck {
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(ApplyEffectToPlayerCardType {
                             card_type: CardType::Creature,
@@ -1484,21 +1268,21 @@ impl Deck {
                 "Draw three cards",
                 vec![
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(DrawCardCardAction {
                             target: CardActionTarget::SelfOwner,
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(DrawCardCardAction {
                             target: CardActionTarget::SelfOwner,
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::None,
                         Arc::new(DrawCardCardAction {
                             target: CardActionTarget::SelfOwner,
@@ -1515,13 +1299,13 @@ impl Deck {
                 "Target creature gets +3/+3 and trample until end of turn",
                 vec![
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::CardOfType(CardType::Creature),
                         Arc::new(ApplyEffectToTargetAction {
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1531,13 +1315,13 @@ impl Deck {
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::CardOfType(CardType::Creature),
                         Arc::new(ApplyEffectToTargetAction {
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     3,
                                     ExpireContract::Turns(1),
                                     source_card,
@@ -1547,7 +1331,7 @@ impl Deck {
                         }),
                     ),
                     CardActionTrigger::new(
-                        ActionTriggerType::Instant,
+                        ActionTriggerType::CardInPlay,
                         CardRequiredTarget::CardOfType(CardType::Creature),
                         Arc::new(ApplyEffectToTargetAction {
                             effect_generator: Arc::new(|target, source_card| {
@@ -1596,7 +1380,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card| {
                                 let effect = StatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     2,
                                     ExpireContract::Never,
                                     source_card,
@@ -1623,7 +1407,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1641,7 +1425,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1668,7 +1452,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1686,7 +1470,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1713,7 +1497,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1731,7 +1515,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1758,7 +1542,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Damage,
+                                    StatType::Power,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),
@@ -1776,7 +1560,7 @@ impl Deck {
                             effect_generator: Arc::new(|target, source_card, amount_calculator| {
                                 Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                                     target,
-                                    StatType::Defense,
+                                    StatType::Toughness,
                                     amount_calculator.clone(),
                                     ExpireContract::Never,
                                     source_card.clone(),

@@ -26,10 +26,11 @@ pub struct StatManager {
 #[derive(Type, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatType {
     Health,
-    Damage,
-    Defense,
+    Power,
+    Toughness,
     Trample,
     Lifelink,
+    Flying,
 }
 
 impl Stat {

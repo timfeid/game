@@ -26,7 +26,7 @@ use super::{
         PlayerActionWrapper, ResetManaPoolAction, TriggerTarget, UntapAllAction,
     },
     card::{Card, CardPhase},
-    deck::Deck,
+    decks::Deck,
     effects::{Effect, EffectID, EffectManager, EffectTarget},
     mana::ManaPool,
     stat::{Stat, StatManager, StatType, Stats},
@@ -76,6 +76,8 @@ pub struct Player {
     #[serde(skip_serializing, skip_deserializing)]
     pub game: Option<Arc<Mutex<Game>>>, // Add this field
     #[serde(skip_serializing, skip_deserializing)]
+    pub health_at_start_of_round: i8,
+    #[serde(skip_serializing, skip_deserializing)]
     pub spells: Vec<Arc<Mutex<Card>>>,
 }
 
@@ -92,23 +94,24 @@ impl Player {
         println!("reset spells");
     }
 
-    pub fn new(name: &str, health: i8, action_points: i8, deck: Vec<Card>) -> Self {
+    pub fn new(name: &str, health: i8, deck: Vec<Card>) -> Self {
         let mut player = Self {
             name: name.to_string(),
             stat_manager: StatManager::new(vec![Stat::new(StatType::Health, health)]),
             is_alive: true,
             cards_in_hand: vec![],
+            health_at_start_of_round: health.clone(),
             cards_in_play: vec![],
             game: None,
             deck: Deck::new(deck),
             spells: vec![],
             triggers: vec![
                 PlayerActionTrigger::new(
-                    ActionTriggerType::PhaseBased(vec![TurnPhase::Untap], TriggerTarget::Owner),
+                    ActionTriggerType::PhaseStarted(vec![TurnPhase::Untap], TriggerTarget::Owner),
                     Arc::new(UntapAllAction {}),
                 ),
                 PlayerActionTrigger::new(
-                    ActionTriggerType::PhaseBased(
+                    ActionTriggerType::PhaseStarted(
                         vec![
                             TurnPhase::Untap,
                             TurnPhase::Upkeep,
@@ -128,13 +131,13 @@ impl Player {
                     Arc::new(ResetManaPoolAction {}),
                 ),
                 PlayerActionTrigger::new(
-                    ActionTriggerType::PhaseBased(vec![TurnPhase::Draw], TriggerTarget::Owner),
+                    ActionTriggerType::PhaseStarted(vec![TurnPhase::Draw], TriggerTarget::Owner),
                     Arc::new(DrawCardAction {
                         target: PlayerActionTarget::SelfPlayer,
                     }),
                 ),
                 PlayerActionTrigger::new(
-                    ActionTriggerType::PhaseBased(
+                    ActionTriggerType::PhaseStarted(
                         vec![TurnPhase::CombatDamage],
                         TriggerTarget::Owner,
                     ),
@@ -161,89 +164,97 @@ impl Player {
         self.deck.destroy(card_arc);
     }
 
-    pub async fn detach_card_in_play(
-        &mut self,
-        index: usize,
-        game: &mut Game,
-    ) -> Vec<Arc<dyn Action + Send + Sync>> {
-        let mut actions = vec![];
-        let mut cards_to_detach = vec![];
+    // pub async fn
 
-        if index >= self.cards_in_play.len() {
-            // Index out of bounds, return empty actions
-            return actions;
-        }
+    // pub async fn detach_card_in_play(
+    //     &mut self,
+    //     index: usize,
+    //     game: &mut Game,
+    // ) -> Vec<Arc<dyn Action + Send + Sync>> {
+    //     let mut actions = vec![];
+    //     let mut cards_to_detach = vec![];
 
-        // Remove the card from cards_in_play and add it to the list of cards to detach
-        let card_arc = self.cards_in_play.remove(index);
-        cards_to_detach.push(card_arc);
+    //     if index >= self.cards_in_play.len() {
+    //         // Index out of bounds, return empty actions
+    //         return actions;
+    //     }
 
-        while let Some(card_arc) = cards_to_detach.pop() {
-            // Remove effects associated with this card
-            game.effect_manager
-                .remove_effects_by_source(&card_arc)
-                .await;
+    //     let card_arc = self.cards_in_play[index].clone();
+    //     cards_to_detach.push(card_arc.clone());
 
-            // Lock the card to access its fields
-            let mut card = card_arc.lock().await;
+    //     while let Some(card_arc) = cards_to_detach.pop() {
+    //         // Remove effects associated with this card
+    //         game.effect_manager
+    //             .remove_effects_by_source(&card_arc)
+    //             .await;
 
-            // If this card has an attached card, detach it and add to cards_to_detach
-            if let Some(attached_arc) = card.attached.take() {
-                cards_to_detach.push(attached_arc);
-            }
+    //         // Lock the card to access its fields
+    //         let mut card = card_arc.lock().await;
+    //         println!("Removing effects from source card {}", card.name);
 
-            // Release the lock on card before proceeding
-            drop(card);
+    //         // If this card has an attached card, detach it and add to cards_to_detach
+    //         if let Some(attached_arc) = card.attached.take() {
+    //             cards_to_detach.push(attached_arc);
+    //         }
 
-            // Remove references to this card from other cards
-            for other_card_arc in &self.cards_in_play {
-                let mut other_card = other_card_arc.lock().await;
+    //         // Release the lock on card before proceeding
+    //         drop(card);
 
-                // Remove references from target
-                if let Some(t) = &other_card.target {
-                    if let EffectTarget::Card(arc) = &t {
-                        if Arc::ptr_eq(arc, &card_arc) {
-                            other_card.target = None;
-                        }
-                    }
-                }
+    //         // Remove references to this card from other cards
+    //         for other_card_arc in &self.cards_in_play {
+    //             let mut other_card = other_card_arc.lock().await;
 
-                // Remove references from action_target
-                if let Some(t) = &other_card.action_target {
-                    if let EffectTarget::Card(arc) = &t {
-                        if Arc::ptr_eq(arc, &card_arc) {
-                            other_card.action_target = None;
-                        }
-                    }
-                }
+    //             // Remove references from target
+    //             // if let Some(t) = &other_card.target {
+    //             //     if let EffectTarget::Card(arc) = &t {
+    //             //         if Arc::ptr_eq(arc, &card_arc) {
+    //             //             other_card.target = None;
+    //             //         }
+    //             //     }
+    //             // }
 
-                // Remove references from attached
-                if let Some(attached_arc) = &other_card.attached {
-                    if Arc::ptr_eq(attached_arc, &card_arc) {
-                        // If the attached card is the detached card, detach it
-                        let detached_attached_arc = other_card.attached.take();
-                        if let Some(detached_attached_arc) = detached_attached_arc {
-                            cards_to_detach.push(detached_attached_arc);
-                        }
-                    }
-                }
-            }
+    //             // Remove references from action_target
+    //             // if let Some(t) = &other_card.action_target {
+    //             //     if let EffectTarget::Card(arc) = &t {
+    //             //         if Arc::ptr_eq(arc, &card_arc) {
+    //             //             other_card.action_target = None;
+    //             //         }
+    //             //     }
+    //             // }
 
-            // Also, remove the card from cards_in_play if it's still there
-            if let Some(pos) = self
-                .cards_in_play
-                .iter()
-                .position(|c| Arc::ptr_eq(c, &card_arc))
-            {
-                self.cards_in_play.remove(pos);
-            }
+    //             // Remove references from attached
+    //             if let Some(attached_arc) = &other_card.attached {
+    //                 if Arc::ptr_eq(attached_arc, &card_arc) {
+    //                     // If the attached card is the detached card, detach it
+    //                     let detached_attached_arc = other_card.attached.take();
+    //                     if let Some(detached_attached_arc) = detached_attached_arc {
+    //                         cards_to_detach.push(detached_attached_arc);
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-            // Optionally, accumulate any actions resulting from detaching the card
-            // actions.extend(card.on_detach_actions());
-        }
+    //         // Also, remove the card from cards_in_play if it's still there
+    //         // if let Some(pos) = self
+    //         //     .cards_in_play
+    //         //     .iter()
+    //         //     .position(|c| Arc::ptr_eq(c, &card_arc))
+    //         // {
+    //         //     self.cards_in_play.remove(pos);
+    //         // }
 
-        actions
-    }
+    //         // Optionally, accumulate any actions resulting from detaching the card
+    //         // actions.extend(card.on_detach_actions());
+    //     }
+
+    //     for card in cards_to_detach {
+    //         if !Arc::ptr_eq(&card, &card_arc) {
+    //             actions.push(Arc::new(DetachCardAction::new(&card)));
+    //         }
+    //     }
+
+    //     actions
+    // }
 
     // pub async fn apply_effects_for_phase(&self, phase: TurnPhase, effect_manager: &EffectManager) {
     //     // Logic to apply player-specific effects for a given phase
@@ -415,21 +426,36 @@ impl Player {
         game: &mut Game,
     ) -> Result<Vec<Arc<dyn Action + Send + Sync>>, String> {
         let actions = {
+            let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
             let card = &self.cards_in_play[in_play_index];
             // let card = card.clone();
-            let mut card_l = card.lock().await;
+            // let mut card_l = card.lock().await;
 
             if let Some(EffectTarget::Card(_card)) = &target {
                 if Arc::ptr_eq(_card, card) {
                     return Err("Cannot attach to self".to_string());
                 }
-                card_l.attached = Some(Arc::clone(_card));
+                let attached = card.lock().await.attached.clone();
+                if let Some(attached) = &attached {
+                    // println!("attached? {:?}", attached);
+                    // if Arc::ptr_eq(attached, card) {
+                    //     return Err("Already attached.".to_string());
+                    // }
+                    game.detach_card(card).await;
+                }
+                card.lock().await.attached = Some(_card.clone());
             }
+
             // card_l.action_target = target.clone();
             // card_l.target = target.clone();
-            card_l
-                .collect_attach_actions(Arc::clone(&card), target.clone())
+            let mut more = card
+                .lock()
                 .await
+                .collect_attach_actions(Arc::clone(&card), target.clone())
+                .await;
+            actions.append(&mut more);
+
+            actions
         };
 
         Ok(actions)
@@ -498,7 +524,7 @@ impl Player {
         index: usize,
         target: Option<EffectTarget>,
         current_turn: Turn,
-    ) -> Result<Arc<dyn Action + Send + Sync>, String> {
+    ) -> Result<(Arc<dyn Action + Send + Sync>, Arc<Mutex<Card>>), String> {
         // Lock the player to mutate state
         let card_arc = {
             let mut player = player_arc.lock().await;
@@ -549,7 +575,7 @@ impl Player {
             target,
         ));
 
-        Ok(action)
+        Ok((action, card_arc))
     }
 
     pub fn draw_card(&mut self) {
@@ -570,7 +596,7 @@ impl Player {
 
         // let card = card.lock().await;
         let actions =
-            Card::collect_phase_based_actions(card, turn, ActionTriggerType::OnCardDestroyed).await;
+            Card::collect_phase_based_actions(card, turn, ActionTriggerType::CardDestroyed).await;
 
         actions
     }
@@ -718,7 +744,7 @@ impl Player {
     }
 
     pub(crate) fn from_claims(user: &crate::services::jwt::Claims) -> Player {
-        Player::new(&user.sub, 20, 10, vec![])
+        Player::new(&user.sub, 20, vec![])
     }
 
     pub async fn empty_mana_pool(&mut self) {

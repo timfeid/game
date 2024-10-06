@@ -4,20 +4,23 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
+    collections::{HashMap, HashSet},
     fmt::{self, Debug},
+    future::Future,
+    pin::Pin,
     sync::Arc,
 };
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
 use super::{
-    card::{Card, CardType},
+    card::{Card, CardType, CreatureType},
     effects::{Effect, EffectID, EffectTarget, ExpireContract},
     mana::ManaType,
     player::Player,
     stat::{StatType, Stats},
     turn::{Turn, TurnPhase},
-    FrontendTarget, Game,
+    FrontendCardTarget, FrontendTarget, Game,
 };
 use crate::{game::stat::Stat, lobby::manager::LobbyCommand};
 
@@ -39,17 +42,17 @@ impl PlayerActionTrigger {
     }
 
     pub async fn trigger(&self, game: &mut Game, index: usize) {
-        if let ActionTriggerType::Tap = self.trigger_type {
+        if let ActionTriggerType::CardTapped = self.trigger_type {
             self.action.apply(game, index).await;
         }
     }
 
     pub(crate) async fn applies_in_phase(&self, turn: Turn, player: Arc<Mutex<Player>>) -> bool {
         match &self.trigger_type {
-            ActionTriggerType::Tap => false,
+            ActionTriggerType::CardTapped => false,
             ActionTriggerType::Attached => true,
-            ActionTriggerType::OnCardDestroyed => true,
-            ActionTriggerType::PhaseBased(phases, trigger_target) => match trigger_target {
+            ActionTriggerType::CardDestroyed => true,
+            ActionTriggerType::PhaseStarted(phases, trigger_target) => match trigger_target {
                 TriggerTarget::Owner => {
                     phases.contains(&turn.phase) && Arc::ptr_eq(&turn.current_player, &player)
                 }
@@ -58,10 +61,10 @@ impl PlayerActionTrigger {
                 }
                 TriggerTarget::Any => phases.contains(&turn.phase) && true,
             },
-            ActionTriggerType::Instant => true,
+            ActionTriggerType::CardInPlay => true,
             ActionTriggerType::Detached => true,
-            ActionTriggerType::TapWithinPhases(phases) => phases.contains(&turn.phase),
-            ActionTriggerType::ManualWithinPhases(mana_requirements, phases) => {
+            ActionTriggerType::CardTappedWithinPhases(phases) => phases.contains(&turn.phase),
+            ActionTriggerType::ActionedWithinPhases(mana_requirements, phases) => {
                 player
                     .lock()
                     .await
@@ -69,10 +72,11 @@ impl PlayerActionTrigger {
                     .await
                     && phases.contains(&turn.phase)
             }
-            ActionTriggerType::Sorcery => {
-                turn.phase == TurnPhase::Main || turn.phase == TurnPhase::Main2
-            }
-            ActionTriggerType::OnDamageApplied => turn.phase == TurnPhase::CombatDamage,
+            // ActionTriggerType::Sorcery => {
+            //     turn.phase == TurnPhase::Main || turn.phase == TurnPhase::Main2
+            // }
+            ActionTriggerType::DamageApplied => turn.phase == TurnPhase::CombatDamage,
+            ActionTriggerType::OtherCardPlayed(trigger_target) => true,
         }
     }
 }
@@ -83,8 +87,15 @@ pub struct ResetCardAction {}
 #[async_trait::async_trait]
 impl CardAction for ResetCardAction {
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
-        let mut card = card.lock().await;
-        card.is_countered = false;
+        {
+            let card = card.clone();
+            let mut card_l = card.lock().await;
+            card_l.is_countered = false;
+        }
+
+        game.effect_manager
+            .remove_effects_by_source(&card, game.current_turn.clone().unwrap())
+            .await;
     }
 }
 
@@ -189,12 +200,7 @@ impl Action for PlayCardAction {
             // };
 
             let mut actions = {
-                let more_actions = Card::collect_phase_based_actions(
-                    &self.card_arc,
-                    game.current_turn.as_ref().unwrap(),
-                    ActionTriggerType::Instant,
-                )
-                .await;
+                let more_actions = game.collect_card_played_actions(&self.card_arc).await;
                 more_actions
             };
 
@@ -263,7 +269,7 @@ impl CardActionTrigger {
 
     pub async fn trigger(&self, game: &mut Game, card: Arc<Mutex<Card>>) {
         let effect_target = match &self.trigger_type {
-            ActionTriggerType::PhaseBased(vec, trigger_target) => {
+            ActionTriggerType::PhaseStarted(vec, trigger_target) => {
                 let owner = {
                     if trigger_target == &TriggerTarget::Owner {
                         &card.lock().await.owner.clone()
@@ -299,19 +305,103 @@ impl CardActionTrigger {
         };
 
         match &self.trigger_type {
-            ActionTriggerType::Tap => {
+            ActionTriggerType::CardTapped => {
                 self.action.apply(game, card, effect_target).await;
             }
             ActionTriggerType::Attached => {
                 self.action.apply(game, card, effect_target).await;
             }
-            ActionTriggerType::Instant => {
+            ActionTriggerType::CardInPlay => {
                 self.action.apply(game, card, effect_target).await;
             }
             x => {
                 println!("nothing triggered for {:?}", x);
             }
         }
+    }
+}
+
+pub struct AsyncClosureWithCardAction {
+    closure: Arc<
+        dyn Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Arc<Mutex<Card>>,
+            ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl AsyncClosureWithCardAction {
+    pub fn new(
+        closure: Arc<
+            dyn Fn(
+                    Arc<Mutex<Game>>,
+                    Arc<Mutex<Card>>,
+                    Arc<Mutex<Card>>,
+                ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
+        Self { closure }
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for AsyncClosureWithCardAction {
+    async fn apply(&self, game: &mut Game, source_card: Arc<Mutex<Card>>, target: EffectTarget) {
+        if let EffectTarget::Card(target_card) = target {
+            let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
+
+            (self.closure)(game_arc.clone(), source_card, target_card).await;
+
+            let mut game_unlocked = game_arc.lock().await;
+            *game = std::mem::take(&mut *game_unlocked);
+        }
+    }
+}
+impl Debug for AsyncClosureWithCardAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AsyncClosureWithCardAction").finish()
+    }
+}
+
+pub struct AsyncClosureAction {
+    closure: Arc<
+        dyn Fn(Arc<Mutex<Game>>, Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = ()> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl AsyncClosureAction {
+    pub fn new(
+        closure: Arc<
+            dyn Fn(Arc<Mutex<Game>>, Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = ()> + Send>>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
+        Self { closure }
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for AsyncClosureAction {
+    async fn apply(&self, game: &mut Game, source_card: Arc<Mutex<Card>>, target: EffectTarget) {
+        let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
+
+        (self.closure)(game_arc.clone(), source_card).await;
+
+        let mut game_unlocked = game_arc.lock().await;
+        *game = std::mem::take(&mut *game_unlocked);
+    }
+}
+impl Debug for AsyncClosureAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AsyncClosureAction").finish()
     }
 }
 
@@ -332,6 +422,7 @@ pub enum CardRequiredTarget {
     EnemyPlayer,
     EnemyCardOrPlayer,
     CardOfType(CardType),
+    CreatureOfType(CreatureType),
     EnemyCardInCombat,
     Spell,
     MultipleCardsOfType(CardType, i8),
@@ -362,16 +453,16 @@ pub enum CardActionType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionTriggerType {
-    Tap,
-    TapWithinPhases(Vec<TurnPhase>),
-    ManualWithinPhases(Vec<ManaType>, Vec<TurnPhase>),
-    PhaseBased(Vec<TurnPhase>, TriggerTarget),
-    OnDamageApplied,
-    Instant,
+    CardInPlay,
+    CardDestroyed,
+    CardTapped,
+    CardTappedWithinPhases(Vec<TurnPhase>),
+    ActionedWithinPhases(Vec<ManaType>, Vec<TurnPhase>),
+    PhaseStarted(Vec<TurnPhase>, TriggerTarget),
+    OtherCardPlayed(TriggerTarget),
+    DamageApplied,
     Attached,
     Detached,
-    OnCardDestroyed,
-    Sorcery,
 }
 
 #[async_trait::async_trait]
@@ -526,8 +617,8 @@ impl CardAction for CardDamageAction {
         match target {
             EffectTarget::Player(target) => {
                 let stats = &mut target.lock().await.stat_manager;
-                let offense = card.get_stat_value(StatType::Damage);
-                let defense = stats.get_stat_value(StatType::Defense);
+                let offense = card.get_stat_value(StatType::Power);
+                let defense = stats.get_stat_value(StatType::Toughness);
                 let total = offense - defense;
                 println!("Do damage {} to {:?}", total, stats);
                 stats.add_stat(
@@ -663,12 +754,12 @@ impl Action for CombatDamageAction {
         for (blocker_arc, attacker_arc) in &self.blocking_pairs {
             let attacker_damage = {
                 let attacker = attacker_arc.lock().await;
-                attacker.get_stat_value(StatType::Damage)
+                attacker.get_stat_value(StatType::Power)
             };
 
             let blocker_damage = {
                 let blocker = blocker_arc.lock().await;
-                blocker.get_stat_value(StatType::Damage)
+                blocker.get_stat_value(StatType::Power)
             };
 
             // Damage to blocker
@@ -698,7 +789,7 @@ impl Action for CombatDamageAction {
             if !is_attacker_blocked(attacker_arc, &blocked_attackers) {
                 let attacker_damage = {
                     let attacker = attacker_arc.lock().await;
-                    attacker.get_stat_value(StatType::Damage)
+                    attacker.get_stat_value(StatType::Power)
                 };
 
                 // Damage to defending player
@@ -733,7 +824,7 @@ impl DamageTarget for Card {
         source: &Arc<Mutex<dyn DamageSource + Send + Sync>>,
     ) {
         // Reduce card's defense or health
-        self.modify_stat(StatType::Defense, -amount);
+        self.modify_stat(StatType::Toughness, -amount);
         println!("{} takes {} damage.", self.name, amount);
     }
 }

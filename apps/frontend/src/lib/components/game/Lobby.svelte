@@ -44,6 +44,13 @@
 				</Button>
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content align="end" class="w-56">
+				<DropdownMenu.Item on:click={() => setDeck('Angels')}>
+					<div
+						class="w-3 h-3 rounded-full border-white border mr-2"
+						class:bg-blue-400={deck === 'Angels'}
+					></div>
+					<span> Angels </span>
+				</DropdownMenu.Item>
 				<DropdownMenu.Item on:click={() => setDeck('Green')}>
 					<div
 						class="w-3 h-3 rounded-full border-green-400 border mr-2"

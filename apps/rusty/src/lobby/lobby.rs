@@ -37,14 +37,14 @@ pub struct Lobby {
     pub data: LobbyData,
 
     #[serde(skip_serializing, skip_deserializing)]
-    game: Arc<RwLock<Game>>,
+    game: Arc<Mutex<Game>>,
 }
 
 impl Lobby {
     pub async fn get_state(&self) -> PublicGameInfo {
         let priority_queue = {
             let cloned_game = self.cloned_game().await;
-            let game = cloned_game.read().await;
+            let game = cloned_game.lock().await;
             if let Some((player, time_left, _)) = &game.current_priority_player {
                 Some(PriorityQueue {
                     player_index: self
@@ -65,7 +65,7 @@ impl Lobby {
         let blocks = {
             let mut blocks = vec![];
             let cloned_game = self.cloned_game().await;
-            let game = cloned_game.read().await;
+            let game = cloned_game.lock().await;
             for (blocker, attacker) in game.combat.blockers.iter() {
                 blocks.push(Block {
                     attacker: { game.frontend_target_from_card(attacker).await },
@@ -79,7 +79,7 @@ impl Lobby {
         let attacks = {
             let mut attacks = vec![];
             let cloned_game = self.cloned_game().await;
-            let game = cloned_game.read().await;
+            let game = cloned_game.lock().await;
             let turn = game.current_turn.clone().unwrap();
             let player = turn.current_player;
             for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
@@ -101,14 +101,14 @@ impl Lobby {
         };
 
         PublicGameInfo {
-            current_turn: self.game.read().await.current_turn.clone(),
+            current_turn: self.game.lock().await.current_turn.clone(),
             priority_queue,
             attacks,
             blocks,
         }
     }
 
-    pub async fn cloned_game(&self) -> Arc<RwLock<Game>> {
+    pub async fn cloned_game(&self) -> Arc<Mutex<Game>> {
         Arc::clone(&self.game)
     }
 }
@@ -125,14 +125,17 @@ pub enum DeckSelector {
     Green,
     Blue,
     Black,
+    Angels,
 }
 
 use crate::{
     error::{AppError, AppResult},
     game::{
-        deck::Deck, effects::EffectTarget, player::Player, Attack, Block, CardWithDetails,
-        FrontendCardTarget, FrontendPileName, FrontendTarget, Game, GameState, GameStatus,
-        PlayerState, PlayerStatus, PriorityQueue, PublicGameInfo,
+        decks::{angels::create_angels_deck, Deck},
+        effects::EffectTarget,
+        player::Player,
+        Attack, Block, CardWithDetails, FrontendCardTarget, FrontendPileName, FrontendTarget, Game,
+        GameState, GameStatus, PlayerState, PlayerStatus, PriorityQueue, PublicGameInfo,
     },
     services::jwt::Claims,
 };
@@ -145,10 +148,10 @@ impl Lobby {
         let mut lobby = Lobby {
             data: LobbyData::default(),
             client: None,
-            game: Arc::new(RwLock::new(game)),
+            game: Arc::new(Mutex::new(game)),
         };
 
-        let player = Player::new(&user.sub.clone(), 20, 8, vec![]);
+        let player = Player::new(&user.sub.clone(), 20, vec![]);
 
         lobby.join(user).await;
 
@@ -158,7 +161,7 @@ impl Lobby {
     pub async fn join(&mut self, user: &Claims) -> &mut Self {
         if !self.data.game_state.players.contains_key(&user.sub) {
             let (index, player) = {
-                let mut game = self.game.write().await;
+                let mut game = self.game.lock().await;
                 let player = Player::from_claims(user);
                 let player = game.add_player(player).await;
                 let index = game.players.len() - 1;
@@ -201,6 +204,7 @@ impl Lobby {
                 DeckSelector::Green => Deck::create_green_deck(),
                 DeckSelector::Blue => Deck::create_blue_deck(),
                 DeckSelector::Black => Deck::create_black_deck(),
+                DeckSelector::Angels => create_angels_deck(),
             });
             deck.set_owner(&player.player).await;
 
@@ -218,10 +222,10 @@ impl Lobby {
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let player = Arc::clone(&self.game.read().await.players[player_index]);
+        let player = Arc::clone(&self.game.lock().await.players[player_index]);
 
         self.game
-            .write()
+            .lock()
             .await
             .attach_card_action(&player, in_play_index, target)
             .await
@@ -237,10 +241,10 @@ impl Lobby {
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let player = Arc::clone(&self.game.read().await.players[player_index]);
+        let player = Arc::clone(&self.game.lock().await.players[player_index]);
 
         self.game
-            .write()
+            .lock()
             .await
             .activate_card_action(&player, in_play_index, target)
             .await
@@ -256,7 +260,7 @@ impl Lobby {
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
         self.game
-            .write()
+            .lock()
             .await
             .play_card(&player, index, target)
             .await
@@ -266,11 +270,11 @@ impl Lobby {
     }
 
     pub async fn advance_turn(&mut self) {
-        self.game.write().await.advance_turn().await;
+        self.game.lock().await.advance_turn().await;
     }
 
     pub async fn start_game(&mut self) {
-        self.game.write().await.start().await;
+        self.game.lock().await.start().await;
     }
 
     pub fn message(&mut self, user: &Claims, message: String) -> &mut Self {

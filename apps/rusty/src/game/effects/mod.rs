@@ -28,7 +28,7 @@ pub enum EffectTarget {
 
 // Define a unique identifier for each effect
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EffectID(String);
+pub struct EffectID(pub String);
 
 impl EffectID {
     pub fn new() -> Self {
@@ -93,10 +93,10 @@ impl EffectManager {
         for effect_id in effect_ids {
             if let Some(effect_arc) = self.effects.clone().get(&effect_id) {
                 let mut effect = effect_arc.lock().await;
-                println!(
-                    "Applying effect for card {}",
-                    effect.get_source_card().clone().unwrap().lock().await.name
-                );
+                // println!(
+                //     "Applying effect for card {}",
+                //     effect.get_source_card().clone().unwrap().lock().await.name
+                // );
                 {
                     effect.apply(turn.clone()).await;
                 }
@@ -128,7 +128,7 @@ impl EffectManager {
         false
     }
 
-    pub async fn remove_effects_by_source(&mut self, source_card: &Arc<Mutex<Card>>) {
+    pub async fn remove_effects_by_source(&mut self, source_card: &Arc<Mutex<Card>>, turn: Turn) {
         let mut effect_ids_to_remove = Vec::new();
 
         // Collect effect entries to avoid holding a mutable borrow on self.effects
@@ -149,10 +149,18 @@ impl EffectManager {
             }
         }
 
+        println!(
+            "removing effects: {:?}\n\nbefore:\n{:?}",
+            effect_ids_to_remove, self.effects
+        );
+
         // Remove effects after iteration
         for effect_id in effect_ids_to_remove {
             self.effects.remove(&effect_id);
         }
+
+        println!("\n\nafter:\n{:?}\n\n", self.effects);
+        self.apply_effects(turn).await;
     }
 }
 
@@ -341,11 +349,26 @@ impl Effect for DynamicStatModifierEffect {
     //     }
     // }
 
+    async fn cleanup(&mut self) {
+        if !self.permanent_change {
+            let id_str = self.get_id().to_string();
+            match &self.target {
+                EffectTarget::Card(card_arc) => {
+                    let mut card = card_arc.lock().await;
+                    card.stats.remove_stat(id_str);
+                }
+                EffectTarget::Player(player_arc) => {
+                    let mut player = player_arc.lock().await;
+                    player.stat_manager.remove_stat(id_str);
+                }
+            }
+        }
+    }
+
     async fn apply(&mut self, turn: Turn) {
         // Recalculate the amount
         if let Some(source_card) = self.source_card.clone() {
             let amount = (self.amount_calculator)(source_card).await;
-            println!("AMOUNT TO APPLY: {}", amount);
             let id = self.get_final_id().to_string();
 
             // Apply the stat modification
@@ -355,6 +378,7 @@ impl Effect for DynamicStatModifierEffect {
                     if self.permanent_change {
                         card.stats.modify_stat(self.stat_type, amount);
                     } else {
+                        // println!("{} should get {} {}", card.name, id, amount);
                         card.stats.add_stat(id, Stat::new(self.stat_type, amount));
                     }
                 }
@@ -481,22 +505,53 @@ impl CardAction for LifeLinkAction {
     }
 }
 pub struct ApplyDynamicEffectToCard {
+    pub id: String,
     pub amount_calculator:
         Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync>,
     pub effects_generator: Arc<
         dyn Fn(
                 EffectTarget,
                 Arc<Mutex<Card>>,
-                Option<Arc<Mutex<Player>>>,
                 Arc<
                     dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
                         + Send
                         + Sync,
                 >,
-            ) -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>>
+                String,
+            )
+                -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>>
             + Send
             + Sync,
     >,
+}
+
+impl ApplyDynamicEffectToCard {
+    pub fn new(
+        amount_calculator: Arc<
+            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync,
+        >,
+        effects_generator: Arc<
+            dyn Fn(
+                    EffectTarget,
+                    Arc<Mutex<Card>>,
+                    Arc<
+                        dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                            + Send
+                            + Sync,
+                    >,
+                    String,
+                ) -> Pin<
+                    Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                > + Send
+                + Sync,
+        >,
+    ) -> Self {
+        ApplyDynamicEffectToCard {
+            amount_calculator,
+            effects_generator,
+            id: Ulid::new().to_string(),
+        }
+    }
 }
 
 impl Debug for ApplyDynamicEffectToCard {
@@ -508,22 +563,28 @@ impl Debug for ApplyDynamicEffectToCard {
 #[async_trait::async_trait]
 impl CardAction for ApplyDynamicEffectToCard {
     async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        let amount_calculator = Arc::clone(&self.amount_calculator);
-        let amount = (&amount_calculator)(Arc::clone(&card_arc)).await;
-        if amount == 0 {
-            println!("hmmm, 0 amount?zc:");
-        }
+        // let amount_calculator = Arc::clone(&self.amount_calculator);
+        // let amount = (&amount_calculator)(Arc::clone(&card_arc)).await;
+        // if amount == 0 {
+        // println!("hmmm, 0 amount?zc:");
+        // }
         let effects = {
             let source_card = Arc::clone(&card_arc);
 
-            let owner = { &source_card.lock().await.owner.clone() };
+            // let owner = { &source_card.lock().await.owner.clone() };
 
-            (self.effects_generator)(target, source_card, owner.clone(), amount_calculator)
+            (self.effects_generator)(
+                target,
+                source_card,
+                self.amount_calculator.clone(),
+                self.id.clone(),
+            )
+            .await
         };
 
         for effect in effects {
             let effect_id = effect.lock().await.get_final_id();
-            println!("received effect from list {:?}", effect_id);
+            // println!("received effect from list {:?}", effect_id);
 
             game.effect_manager.add_effect(effect_id, effect);
         }

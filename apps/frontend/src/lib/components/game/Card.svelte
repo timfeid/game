@@ -36,7 +36,7 @@
 
 	function displayOtherStats(stats: (typeof card)['stats']) {
 		return Object.values(stats.stats).filter(
-			(stat) => stat.stat_type !== 'Damage' && stat.stat_type !== 'Defense'
+			(stat) => stat.stat_type !== 'Power' && stat.stat_type !== 'Toughness'
 		);
 	}
 
@@ -46,9 +46,9 @@
 		damage = 0;
 		defense = 0;
 		for (let stat of Object.values(stats.stats)) {
-			if (stat.stat_type === 'Damage') {
+			if (stat.stat_type === 'Power') {
 				damage += stat.intensity;
-			} else if (stat.stat_type === 'Defense') {
+			} else if (stat.stat_type === 'Toughness') {
 				defense += stat.intensity;
 			}
 		}
@@ -90,14 +90,17 @@
 		class="relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
 	>
 		<div
-			class="card-header flex items-center justify-between w-full py-0.5 px-2"
+			class="card-header flex items-center justify-between w-full py-0.5 px-2 w-full"
 			class:bg-green-200={card.card_type?.BasicLand === 'Green'}
 			class:bg-blue-200={card.card_type?.BasicLand === 'Blue'}
 			class:bg-black={card.card_type?.BasicLand === 'Black'}
+			class:bg-white={card.card_type?.BasicLand === 'White'}
 			class:text-white={card.card_type?.BasicLand === 'Black'}
+			class:text-black={card.card_type?.BasicLand === 'White'}
 			class:dark:bg-green-800={card.card_type?.BasicLand === 'Green'}
 			class:dark:bg-blue-800={card.card_type?.BasicLand === 'Blue'}
 			class:dark:bg-black={card.card_type?.BasicLand === 'Black'}
+			class:dark:bg-white={card.card_type?.BasicLand === 'White'}
 		>
 			<h2 class="text-sm font-bold truncate">
 				{card.name}

@@ -63,7 +63,7 @@ impl LobbyManager {
 
         tokio::spawn(async move {
             let rx = {
-                let game = game_arc_clone.read().await;
+                let game = game_arc_clone.lock().await;
                 game.turn_change_sender
                     .as_ref()
                     .map(|sender| sender.subscribe())
@@ -185,7 +185,7 @@ impl LobbyManager {
                 FrontendTarget::Card(frontend_card_target) => match frontend_card_target.pile {
                     crate::game::FrontendPileName::Hand => {
                         let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.read().await.players
+                            &lobby.lock().await.cloned_game().await.lock().await.players
                                 [frontend_card_target.player_index as usize],
                         );
                         let card = &player.lock().await.cards_in_hand
@@ -194,7 +194,7 @@ impl LobbyManager {
                     }
                     crate::game::FrontendPileName::Play => {
                         let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.read().await.players
+                            &lobby.lock().await.cloned_game().await.lock().await.players
                                 [frontend_card_target.player_index as usize],
                         );
                         let card = &player.lock().await.cards_in_play
@@ -203,7 +203,7 @@ impl LobbyManager {
                     }
                     crate::game::FrontendPileName::Spell => {
                         let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.read().await.players
+                            &lobby.lock().await.cloned_game().await.lock().await.players
                                 [frontend_card_target.player_index as usize],
                         );
                         let card =
@@ -212,7 +212,7 @@ impl LobbyManager {
                     }
                 },
                 FrontendTarget::Player(player_index) => Some(EffectTarget::Player(Arc::clone(
-                    &lobby.lock().await.cloned_game().await.read().await.players
+                    &lobby.lock().await.cloned_game().await.lock().await.players
                         [player_index as usize],
                 ))),
             },
@@ -319,7 +319,7 @@ impl LobbyManager {
         let lobby_id_clone = lobby_id.clone();
 
         {
-            let mut game = game_arc.write().await;
+            let mut game = game_arc.lock().await;
             game.play_card(&player_arc, args.in_hand_index as usize, target.clone())
                 .await
                 .map_err(|x| AppError::BadRequest(x))?;
@@ -410,6 +410,7 @@ impl LobbyManager {
                     player.public_info.health = game_player
                         .stat_manager
                         .get_stat_value(crate::game::stat::StatType::Health);
+                    println!("{:?}", game_player.stat_manager);
                     player.hand = hand;
                 }
             }
