@@ -8,6 +8,7 @@
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
 	import ManaBubble from './mana-bubble.svelte';
+	import Ability from './card/ability.svelte';
 
 	export let cardWithDetails: CardWithDetails;
 	export let className: string = '';
@@ -105,7 +106,7 @@
 			<h2 class="text-sm font-bold truncate">
 				{card.name}
 			</h2>
-			<div class="absolute flex space-x-2 right-2">
+			<div class="absolute flex space-x-1 bottom-2 right-2">
 				{#each card.cost as color}
 					<ManaBubble {color} />
 				{/each}
@@ -141,8 +142,15 @@
 			</ul>
 		</div>
 
-		<div class="text-left mb-4 line-clamp-3 h-16 px-2 text-sm">
+		<div class="text-left mb-6 px-2 text-sm">
 			<p class="text-gray-700 dark:text-gray-300">{card.description}</p>
+			<div>
+				{#each cardWithDetails.abilities as ability}
+					{#if ability.show}
+						<Ability {ability} />
+					{/if}
+				{/each}
+			</div>
 		</div>
 		<div class="text-left px-2 absolute top-full pb-1 -translate-y-full">
 			<span class="text-xs text-gray-400 uppercase font-sans">

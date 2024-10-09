@@ -5,8 +5,9 @@
 </script>
 
 <div
-	class="w-3 h-3 rounded-full border border-black"
+	class="w-3 h-3 rounded-full border border-black dark:border-white"
 	class:bg-green-400={color.toLowerCase() === 'green'}
+	class:bg-red-400={color.toLowerCase() === 'red'}
 	class:bg-blue-400={color.toLowerCase() === 'blue'}
 	class:bg-gray-950={color.toLowerCase() === 'black'}
 	class:bg-white={color.toLowerCase() === 'white'}

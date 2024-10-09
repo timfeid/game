@@ -10,6 +10,8 @@
 	import Player from './Player.svelte';
 	import PriorityQueueNotification from './priority-queue-notification.svelte';
 	import { ArrowBigRight } from 'lucide-svelte';
+	import AskOptionalAbility from './dialog/cast-optional-ability.svelte';
+	import CastMandatoryAbility from './dialog/cast-mandatory-ability.svelte';
 
 	export let game_state: GameState;
 	export let turnMessage: LobbyTurnMessage | undefined;
@@ -23,14 +25,14 @@
 		await client.mutation(['lobby.turn', join_code]);
 	}
 
-	async function executePlayCard(index: number, target?: FrontendTarget) {
+	async function executePlayCard(index: number, target: FrontendTarget | null) {
 		try {
 			await client.mutation([
 				'lobby.play_card',
 				{
 					code: join_code,
 					in_hand_index: index,
-					target: target || null
+					target: target
 				}
 			]);
 		} catch (e) {
@@ -42,7 +44,7 @@
 	}
 	async function playCard(index: number) {
 		const card = self.hand[index];
-		const target = await waitForTarget(card, game_state, true);
+		const target = await waitForTarget(card.abilities[0], game_state, true);
 		return await executePlayCard(index, target);
 	}
 
@@ -103,3 +105,5 @@
 	</div>
 </div>
 <!-- <pre>{JSON.stringify(self)}</pre> -->
+<AskOptionalAbility code={join_code} game={game_state} />
+<CastMandatoryAbility code={join_code} game={game_state} />

@@ -36,6 +36,31 @@ pub struct ManaPool {
 }
 
 impl ManaPool {
+    pub fn to_vec(&self) -> Vec<ManaType> {
+        let mut mana_vec = Vec::new();
+
+        for _ in 0..self.white {
+            mana_vec.push(ManaType::White);
+        }
+        for _ in 0..self.blue {
+            mana_vec.push(ManaType::Blue);
+        }
+        for _ in 0..self.black {
+            mana_vec.push(ManaType::Black);
+        }
+        for _ in 0..self.red {
+            mana_vec.push(ManaType::Red);
+        }
+        for _ in 0..self.green {
+            mana_vec.push(ManaType::Green);
+        }
+        for _ in 0..self.colorless {
+            mana_vec.push(ManaType::Colorless);
+        }
+
+        mana_vec
+    }
+
     pub fn new() -> Self {
         ManaPool {
             white: 0,

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::{
     action::{ActionTriggerType, CardAction, CardActionTarget},
-    card::{Card, CardType},
+    card::{Card, CardType, CreatureType},
     player::Player,
     stat::{Stat, StatType, Stats},
     turn::{Turn, TurnPhase},
@@ -93,10 +93,11 @@ impl EffectManager {
         for effect_id in effect_ids {
             if let Some(effect_arc) = self.effects.clone().get(&effect_id) {
                 let mut effect = effect_arc.lock().await;
-                // println!(
-                //     "Applying effect for card {}",
-                //     effect.get_source_card().clone().unwrap().lock().await.name
-                // );
+                println!(
+                    "Applying effect {:?} for card {}",
+                    effect,
+                    effect.get_source_card().clone().unwrap().lock().await.name
+                );
                 {
                     effect.apply(turn.clone()).await;
                 }
@@ -488,6 +489,9 @@ pub struct LifeLinkAction {}
 
 #[async_trait::async_trait]
 impl CardAction for LifeLinkAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
         let (owner, amount) = {
             let lock = card_arc.lock().await;
@@ -502,286 +506,5 @@ impl CardAction for LifeLinkAction {
                 .stat_manager
                 .add_stat(Ulid::new().to_string(), Stat::new(StatType::Health, amount));
         }
-    }
-}
-pub struct ApplyDynamicEffectToCard {
-    pub id: String,
-    pub amount_calculator:
-        Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync>,
-    pub effects_generator: Arc<
-        dyn Fn(
-                EffectTarget,
-                Arc<Mutex<Card>>,
-                Arc<
-                    dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
-                        + Send
-                        + Sync,
-                >,
-                String,
-            )
-                -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>>
-            + Send
-            + Sync,
-    >,
-}
-
-impl ApplyDynamicEffectToCard {
-    pub fn new(
-        amount_calculator: Arc<
-            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync,
-        >,
-        effects_generator: Arc<
-            dyn Fn(
-                    EffectTarget,
-                    Arc<Mutex<Card>>,
-                    Arc<
-                        dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
-                            + Send
-                            + Sync,
-                    >,
-                    String,
-                ) -> Pin<
-                    Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
-                > + Send
-                + Sync,
-        >,
-    ) -> Self {
-        ApplyDynamicEffectToCard {
-            amount_calculator,
-            effects_generator,
-            id: Ulid::new().to_string(),
-        }
-    }
-}
-
-impl Debug for ApplyDynamicEffectToCard {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplyDynamicEffectToCard").finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl CardAction for ApplyDynamicEffectToCard {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        // let amount_calculator = Arc::clone(&self.amount_calculator);
-        // let amount = (&amount_calculator)(Arc::clone(&card_arc)).await;
-        // if amount == 0 {
-        // println!("hmmm, 0 amount?zc:");
-        // }
-        let effects = {
-            let source_card = Arc::clone(&card_arc);
-
-            // let owner = { &source_card.lock().await.owner.clone() };
-
-            (self.effects_generator)(
-                target,
-                source_card,
-                self.amount_calculator.clone(),
-                self.id.clone(),
-            )
-            .await
-        };
-
-        for effect in effects {
-            let effect_id = effect.lock().await.get_final_id();
-            // println!("received effect from list {:?}", effect_id);
-
-            game.effect_manager.add_effect(effect_id, effect);
-        }
-    }
-}
-
-pub struct ApplyEffectToCardBasedOnTotalCardType {
-    pub card_type: CardType,
-    pub effect_generator: Arc<
-        dyn Fn(
-                EffectTarget,
-                Option<Arc<Mutex<Card>>>,
-                Arc<
-                    dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
-                        + Send
-                        + Sync,
-                >,
-            ) -> Arc<Mutex<dyn Effect + Send + Sync>>
-            + Send
-            + Sync,
-    >,
-}
-
-impl Debug for ApplyEffectToCardBasedOnTotalCardType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplyEffectToCardBasedOnTotalCardType")
-            .finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl CardAction for ApplyEffectToCardBasedOnTotalCardType {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        println!(
-            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
-            card_arc, target
-        );
-        let owner_arc = {
-            let card = card_arc.lock().await;
-            card.owner.clone()
-        };
-
-        if let Some(_) = owner_arc {
-            let source_card = Some(Arc::clone(&card_arc));
-            let target = { card_arc.lock().await.attached.clone() };
-
-            if let Some(target_arc) = target {
-                let card_type = self.card_type;
-                let amount_calculator = {
-                    Arc::new(move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
-                        Box::pin(async move {
-                            let mut total = 0;
-
-                            let (card_type, owner) = {
-                                let card =card_arc.lock().await;
-                                let owner = card.owner.clone();
-                                ( card_type, owner )
-                            };
-
-                            if let Some(owner_arc) = owner {
-
-                                let owner = owner_arc.lock().await;
-                                for card_in_play in &owner.cards_in_play {
-                                    let card_type_matches = {
-                                        let card = card_in_play.lock().await;
-                                        card.card_type == card_type
-                                    };
-
-                                    if card_type_matches {
-                                        total += 1;
-                                    }
-                                }
-                            }
-                            total
-                        })
-                    })
-                };
-
-                let effect = (self.effect_generator)(
-                    EffectTarget::Card(target_arc),
-                    source_card,
-                    amount_calculator,
-                );
-
-                let effect_id = effect.lock().await.get_final_id();
-
-                game.effect_manager.add_effect(effect_id, effect);
-            } else {
-                println!("OH NO, NO ATTACHED CARD ON {}", &card_arc.lock().await.name);
-            }
-        } else {
-            println!("No owner found for the card.");
-        }
-    }
-}
-
-pub struct ApplyEffectToPlayerCardType {
-    pub card_type: CardType,
-    pub effect_generator: Arc<
-        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
-            + Send
-            + Sync,
-    >,
-}
-
-impl Debug for ApplyEffectToPlayerCardType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplyEffectToPlayerCardType").finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl CardAction for ApplyEffectToPlayerCardType {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        println!(
-            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
-            card_arc, target
-        );
-        let owner_arc = {
-            let card = card_arc.lock().await;
-            card.owner.clone()
-        };
-
-        if let Some(owner_arc) = owner_arc {
-            let owner = owner_arc.lock().await;
-
-            // Iterate over the owner's in-play cards and apply the effect to matching card types
-            for card_in_play in &owner.cards_in_play {
-                let card_type_matches = {
-                    let card = card_in_play.lock().await;
-                    card.card_type == self.card_type
-                };
-
-                if card_type_matches {
-                    let source_card = Some(Arc::clone(&card_arc));
-                    let effect = (self.effect_generator)(
-                        EffectTarget::Card(Arc::clone(&card_in_play)),
-                        source_card,
-                    );
-                    let effect_id = effect.lock().await.get_final_id();
-
-                    game.effect_manager.add_effect(effect_id, effect);
-                } else {
-                    // println!("Card does not match card type {:?}", self.card_type);
-                }
-            }
-        } else {
-            println!("No owner found for the card.");
-        }
-    }
-}
-
-pub struct ApplyEffectToTargetAction {
-    pub effect_generator: Arc<
-        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
-            + Send
-            + Sync,
-    >,
-}
-
-impl Debug for ApplyEffectToTargetAction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ApplyEffectToTargetAction").finish()
-    }
-}
-
-#[async_trait::async_trait]
-impl CardAction for ApplyEffectToTargetAction {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        let target = {
-            let card = card_arc.lock().await;
-            card.target.clone()
-        }; // Lock is released here
-
-        if let Some(target) = target {
-            let source_card = Some(Arc::clone(&card_arc)); // Set the source card
-            let effect = (self.effect_generator)(target.clone(), source_card);
-            let effect_id = effect.lock().await.get_final_id();
-            println!("Adding effect {:?} to card {:?}", effect, target);
-
-            game.effect_manager.add_effect(effect_id, effect);
-        } else {
-            println!("No target specified for card action.");
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct DrawCardCardAction {
-    pub target: CardActionTarget,
-}
-
-#[async_trait::async_trait]
-impl CardAction for DrawCardCardAction {
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        let card = card_arc.lock().await;
-        let owner = card.owner.as_ref().unwrap();
-        owner.lock().await.draw_card();
     }
 }

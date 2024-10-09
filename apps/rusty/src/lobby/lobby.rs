@@ -126,12 +126,16 @@ pub enum DeckSelector {
     Blue,
     Black,
     Angels,
+    Red,
 }
 
 use crate::{
     error::{AppError, AppResult},
     game::{
-        decks::{angels::create_angels_deck, Deck},
+        decks::{
+            black::create_black_deck, blue::create_blue_deck, green::create_green_deck,
+            red::create_red_deck, white::create_angels_deck, Deck,
+        },
         effects::EffectTarget,
         player::Player,
         Attack, Block, CardWithDetails, FrontendCardTarget, FrontendPileName, FrontendTarget, Game,
@@ -201,10 +205,11 @@ impl Lobby {
             player.status = PlayerStatus::Ready;
             let mut p = player.player.lock().await;
             let deck = Deck::new(match player.deck {
-                DeckSelector::Green => Deck::create_green_deck(),
-                DeckSelector::Blue => Deck::create_blue_deck(),
-                DeckSelector::Black => Deck::create_black_deck(),
+                DeckSelector::Green => create_green_deck(),
+                DeckSelector::Blue => create_blue_deck(),
+                DeckSelector::Black => create_black_deck(),
                 DeckSelector::Angels => create_angels_deck(),
+                DeckSelector::Red => create_red_deck(),
             });
             deck.set_owner(&player.player).await;
 
@@ -234,11 +239,39 @@ impl Lobby {
         Ok(())
     }
 
+    pub async fn respond_mandatory_player_ability(
+        &mut self,
+        ability_id: String,
+        player: Arc<Mutex<Player>>,
+        target: Option<EffectTarget>,
+    ) -> AppResult<()> {
+        Game::respond_player_ability(self.game.clone(), &player, ability_id, true, target)
+            .await
+            .map_err(|x| AppError::BadRequest(x))?;
+
+        Ok(())
+    }
+
+    pub async fn respond_optional_player_ability(
+        &mut self,
+        ability_id: String,
+        player: Arc<Mutex<Player>>,
+        target: Option<EffectTarget>,
+        response: bool,
+    ) -> AppResult<()> {
+        Game::respond_player_ability(self.game.clone(), &player, ability_id, response, target)
+            .await
+            .map_err(|x| AppError::BadRequest(x))?;
+
+        Ok(())
+    }
+
     pub async fn action_card(
         &mut self,
         player_index: usize,
         in_play_index: usize,
         target: Option<EffectTarget>,
+        trigger_id: String,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
         let player = Arc::clone(&self.game.lock().await.players[player_index]);
@@ -246,7 +279,7 @@ impl Lobby {
         self.game
             .lock()
             .await
-            .activate_card_action(&player, in_play_index, target)
+            .activate_card_action(&player, in_play_index, target, trigger_id)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 

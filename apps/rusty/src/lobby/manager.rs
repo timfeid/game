@@ -17,10 +17,16 @@ use tokio::sync::Mutex;
 
 use super::lobby::{Lobby, LobbyData};
 use crate::error::{AppError, AppResult};
+use crate::game::action::{CardAction, CardRequiredTarget};
+use crate::game::card::Card;
 use crate::game::effects::EffectTarget;
+use crate::game::mana::ManaType;
+use crate::game::player::Player;
 use crate::game::stat::Stats;
-use crate::game::{CardWithDetails, FrontendTarget, Game, GameStatus, PlayerStatus};
-use crate::http::controllers::lobby::{ActionCardArgs, PlayCardArgs};
+use crate::game::{ActionType, CardWithDetails, FrontendTarget, Game, GameStatus, PlayerStatus};
+use crate::http::controllers::lobby::{
+    ActionCardArgs, PlayCardArgs, RespondMandatoryAbility, RespondOptionalAbility,
+};
 use crate::services::jwt::{Claims, JwtService};
 
 #[derive(Clone)]
@@ -35,11 +41,59 @@ pub struct LobbyTurnMessage {
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub struct AbilityDetails {
+    pub mana_cost: Vec<ManaType>,
+    pub required_target: CardRequiredTarget,
+    pub description: String,
+    pub action_type: ActionType,
+    pub show: bool,
+    pub id: String,
+    pub meets_requirements: bool,
+}
+
+#[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub struct ExecuteAbility {
+    card: CardWithDetails,
+    details: AbilityDetails,
+    pub player_id: String,
+}
+
+impl ExecuteAbility {
+    pub fn new(
+        player_id: String,
+        card: CardWithDetails,
+        action_type: ActionType,
+        mana_cost: Vec<ManaType>,
+        required_target: CardRequiredTarget,
+        description: String,
+        id: String,
+        meets_requirements: bool,
+    ) -> Self {
+        Self {
+            card,
+            details: AbilityDetails {
+                mana_cost,
+                required_target,
+                description,
+                action_type,
+                show: true,
+                id,
+                meets_requirements,
+            },
+            player_id,
+        }
+    }
+}
+
+#[derive(Type, Clone, Deserialize, Serialize, Debug)]
+#[specta(export = false)]
 pub enum LobbyCommand {
     Updated(LobbyData),
     Messages(Vec<String>),
     DebugMessage(String),
     TurnMessages(LobbyTurnMessage),
+    AskExecuteAbility(ExecuteAbility),
+    MandatoryExecuteAbility(ExecuteAbility),
 }
 
 impl std::fmt::Debug for LobbyManager {
@@ -64,7 +118,7 @@ impl LobbyManager {
         tokio::spawn(async move {
             let rx = {
                 let game = game_arc_clone.lock().await;
-                game.turn_change_sender
+                game.broadcast_sender
                     .as_ref()
                     .map(|sender| sender.subscribe())
             };
@@ -260,6 +314,7 @@ impl LobbyManager {
                     args.player_index as usize,
                     args.in_play_index as usize,
                     target,
+                    args.trigger_id,
                 )
                 .await?;
             println!("actioned card, notifying lobby");
@@ -270,36 +325,78 @@ impl LobbyManager {
         Ok(())
     }
 
-    // pub async fn play_card(&self, args: PlayCardArgs, user: &Claims) -> AppResult<()> {
-    //     let lobby_id = args.code;
-    //     {
-    //         let hash_map = self.lobbies.lock().await;
-    //         let lobby_arc = hash_map
-    //             .get(&lobby_id)
-    //             .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-    //         //  let current_player_index = lobby.lock().await.get_state().await.current_turn.unwrap().current_player_index;
-    //         println!("getting lobby");
+    pub async fn respond_mandatory_player_ability(
+        &self,
+        args: RespondMandatoryAbility,
+        user: &Claims,
+    ) -> AppResult<()> {
+        let lobby_id = args.code;
+        {
+            let hash_map = self.lobbies.lock().await;
+            let lobby = hash_map
+                .get(&lobby_id)
+                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let target = { Self::convert(args.target, lobby).await };
+            let player = lobby
+                .lock()
+                .await
+                .data
+                .game_state
+                .players
+                .get(&user.sub)
+                .unwrap()
+                .player
+                .clone();
 
-    //         let player = {
-    //             let lobby = lobby_arc.lock().await;
-    //             println!("getting player");
-    //             Arc::clone(&lobby.data.game_state.players.get(&user.sub).unwrap().player)
-    //         };
-    //         println!("getting target");
-    //         let target = Self::convert(args.target, lobby_arc).await;
-    //         Arc::clone(lobby_arc)
-    //             .lock()
-    //             .await
-    //             .play_card(player, args.in_hand_index as usize, target.clone())
-    //             .await?;
-    //         println!("targeted {:?}", target);
-    //         println!("played card, notifying lobby");
-    //     }
-    //     // lobby.lock().await.message(user, args.text);
-    //     self.notify_lobby(&lobby_id).await.ok();
+            lobby
+                .lock()
+                .await
+                .respond_mandatory_player_ability(args.ability_id, player, target)
+                .await?;
+            println!("actioned card, notifying lobby");
+        }
+        // lobby.lock().await.message(user, args.text);
+        self.notify_lobby(&lobby_id).await.ok();
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
+
+    pub async fn respond_optional_player_ability(
+        &self,
+        args: RespondOptionalAbility,
+        user: &Claims,
+    ) -> AppResult<()> {
+        let lobby_id = args.code;
+        {
+            let hash_map = self.lobbies.lock().await;
+            let lobby = hash_map
+                .get(&lobby_id)
+                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let target = { Self::convert(args.target, lobby).await };
+            let player = lobby
+                .lock()
+                .await
+                .data
+                .game_state
+                .players
+                .get(&user.sub)
+                .unwrap()
+                .player
+                .clone();
+
+            lobby
+                .lock()
+                .await
+                .respond_optional_player_ability(args.ability_id, player, target, args.response)
+                .await?;
+            println!("actioned card, notifying lobby");
+        }
+        // lobby.lock().await.message(user, args.text);
+        self.notify_lobby(&lobby_id).await.ok();
+
+        Ok(())
+    }
+
     pub async fn play_card(&self, args: PlayCardArgs, user: &Claims) -> AppResult<()> {
         let lobby_id = args.code.clone();
         let lobby_arc = self.get_lobby(&lobby_id).await?;
@@ -337,6 +434,7 @@ impl LobbyManager {
     pub async fn update_game_state(&self, lobby_id: &str) {
         let hash_map = self.lobbies.lock().await;
         let mut lobby = hash_map.get(lobby_id).unwrap().lock().await;
+        let game = lobby.cloned_game().await;
         match lobby.data.game_state.status {
             GameStatus::NeedsPlayers => {
                 let all_ready = lobby
@@ -352,65 +450,61 @@ impl LobbyManager {
             }
             GameStatus::WaitingForStart(duration) => {
                 lobby.data.game_state.status = GameStatus::WaitingForStart(duration - 1);
-                if lobby.data.game_state.status == GameStatus::WaitingForStart(0) {
+                if lobby.data.game_state.status == GameStatus::WaitingForStart(1) {
                     lobby.data.game_state.status = GameStatus::InGame;
                     lobby.start_game().await;
                 }
             }
             GameStatus::InGame => {
-                lobby.data.game_state.public_info = lobby.get_state().await;
-                let phase = lobby
-                    .data
-                    .game_state
-                    .public_info
-                    .current_turn
-                    .clone()
-                    .unwrap()
-                    .phase;
+                let phase = {
+                    lobby.data.game_state.public_info = lobby.get_state().await;
+                    lobby
+                        .data
+                        .game_state
+                        .public_info
+                        .current_turn
+                        .clone()
+                        .unwrap()
+                        .phase
+                };
 
                 for (_, player) in lobby.data.game_state.players.iter_mut() {
-                    let game_player = player.player.lock().await;
-
-                    // Create a new vector to hold the cloned cards
                     let mut hand = Vec::new();
                     let mut cards_in_play = Vec::new();
                     let mut spells = Vec::new();
+                    let player_cards_in_play = &player.player.lock().await.cards_in_play.clone();
+                    let player_spells = &player.player.lock().await.spells.clone();
+                    let player_cards_in_hand = &player.player.lock().await.cards_in_hand.clone();
 
-                    // Iterate over each card in the player's hand
-                    for card in &game_player.cards_in_play {
-                        // Lock the card and clone it
-                        let card_clone = card.lock().await.clone();
-
-                        // Push the cloned card into the hand vector
-                        cards_in_play.push(CardWithDetails::from_card(card_clone, phase.clone()));
+                    for card in player_cards_in_play {
+                        cards_in_play.push(
+                            CardWithDetails::from_card_arc(card, phase.clone(), true, &game).await,
+                        );
                     }
 
-                    for card in &game_player.spells {
-                        // Lock the card and clone it
-                        let card_clone = card.lock().await.clone();
-
-                        // Push the cloned card into the hand vector
-                        spells.push(CardWithDetails::from_card(card_clone, phase.clone()));
+                    for card in player_spells {
+                        spells.push(
+                            CardWithDetails::from_card_arc(card, phase.clone(), false, &game).await,
+                        );
                     }
 
-                    for card in &game_player.cards_in_hand {
-                        // Lock the card and clone it
-                        let card_clone = card.lock().await.clone();
-
-                        // Push the cloned card into the hand vector
-                        hand.push(CardWithDetails::from_card(card_clone, phase));
+                    for card in player_cards_in_hand {
+                        hand.push(
+                            CardWithDetails::from_card_arc(card, phase.clone(), false, &game).await,
+                        );
                     }
 
-                    // Assign the new hand to the player's hand field
-                    // println!("udpated player hand to {:?}", hand);
-                    player.public_info.spells = spells;
-                    player.public_info.hand_size = hand.len() as i32;
-                    player.public_info.cards_in_play = cards_in_play;
-                    player.public_info.mana_pool = game_player.mana_pool.clone();
-                    player.public_info.health = game_player
-                        .stat_manager
-                        .get_stat_value(crate::game::stat::StatType::Health);
-                    println!("{:?}", game_player.stat_manager);
+                    {
+                        let game_player = player.player.lock().await;
+
+                        player.public_info.spells = spells;
+                        player.public_info.hand_size = hand.len() as i32;
+                        player.public_info.cards_in_play = cards_in_play;
+                        player.public_info.mana_pool = game_player.mana_pool.clone();
+                        player.public_info.health = game_player
+                            .stat_manager
+                            .get_stat_value(crate::game::stat::StatType::Health);
+                    }
                     player.hand = hand;
                 }
             }

@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     future::Future,
@@ -20,7 +21,7 @@ use super::{
     player::Player,
     stat::{StatType, Stats},
     turn::{Turn, TurnPhase},
-    FrontendCardTarget, FrontendTarget, Game,
+    Ability, ActionType, FrontendCardTarget, FrontendTarget, Game,
 };
 use crate::{game::stat::Stat, lobby::manager::LobbyCommand};
 
@@ -41,15 +42,8 @@ impl PlayerActionTrigger {
         }
     }
 
-    pub async fn trigger(&self, game: &mut Game, index: usize) {
-        if let ActionTriggerType::CardTapped = self.trigger_type {
-            self.action.apply(game, index).await;
-        }
-    }
-
     pub(crate) async fn applies_in_phase(&self, turn: Turn, player: Arc<Mutex<Player>>) -> bool {
         match &self.trigger_type {
-            ActionTriggerType::CardTapped => false,
             ActionTriggerType::Attached => true,
             ActionTriggerType::CardDestroyed => true,
             ActionTriggerType::PhaseStarted(phases, trigger_target) => match trigger_target {
@@ -61,22 +55,32 @@ impl PlayerActionTrigger {
                 }
                 TriggerTarget::Any => phases.contains(&turn.phase) && true,
             },
-            ActionTriggerType::CardInPlay => true,
+            ActionTriggerType::CardPlayedFromHand => true,
+            ActionTriggerType::Continuous => true,
             ActionTriggerType::Detached => true,
-            ActionTriggerType::CardTappedWithinPhases(phases) => phases.contains(&turn.phase),
-            ActionTriggerType::ActionedWithinPhases(mana_requirements, phases) => {
-                player
+            // ActionTriggerType::CardTapped => false,
+            // ActionTriggerType::CardTappedWithinPhases(phases) => phases.contains(&turn.phase),
+            ActionTriggerType::AbilityWithinPhases(_, mana_requirements, phases, tap_required) => {
+                let has_mana = player
                     .lock()
                     .await
                     .has_required_mana(mana_requirements)
-                    .await
-                    && phases.contains(&turn.phase)
+                    .await;
+
+                let within_phase = phases
+                    .as_ref()
+                    .and_then(|phase| Some(phase.contains(&turn.phase)))
+                    .unwrap_or(true);
+                // let can_tap_card = not necesssary right meow
+
+                has_mana && within_phase
             }
             // ActionTriggerType::Sorcery => {
             //     turn.phase == TurnPhase::Main || turn.phase == TurnPhase::Main2
             // }
             ActionTriggerType::DamageApplied => turn.phase == TurnPhase::CombatDamage,
             ActionTriggerType::OtherCardPlayed(trigger_target) => true,
+            ActionTriggerType::CreatureTypeCardPlayed(trigger_target, creature_type) => true,
         }
     }
 }
@@ -86,6 +90,9 @@ pub struct ResetCardAction {}
 
 #[async_trait::async_trait]
 impl CardAction for ResetCardAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         {
             let card = card.clone();
@@ -125,6 +132,9 @@ pub struct CounterSpellAction {}
 
 #[async_trait::async_trait]
 impl CardAction for CounterSpellAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
         if let EffectTarget::Card(target_action_arc) = &target {
             target_action_arc.lock().await.is_countered = true;
@@ -225,6 +235,9 @@ pub struct ReturnToHandAction {}
 
 #[async_trait::async_trait]
 impl CardAction for ReturnToHandAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
         if let EffectTarget::Card(target_card_arc) = target {
             let owner_arc = {
@@ -247,23 +260,67 @@ impl CardAction for ReturnToHandAction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CardActionTrigger {
+    pub id: String,
     pub trigger_type: ActionTriggerType,
     pub action: Arc<dyn CardAction + Send + Sync>,
     pub card_required_target: CardRequiredTarget,
+    pub requirements: Arc<
+        dyn Fn(Arc<Mutex<Game>>, Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = bool> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for CardActionTrigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CardActionTrigger")
+            .field("id", &self.id)
+            .field("trigger_type", &self.trigger_type)
+            .field("action", &self.action)
+            .field("card_required_target", &self.card_required_target)
+            .finish()
+    }
 }
 
 impl CardActionTrigger {
+    pub fn new_with_requirements(
+        trigger_type: ActionTriggerType,
+        card_required_target: CardRequiredTarget,
+        action: Arc<dyn CardAction + Send + Sync>,
+        requirements: Arc<
+            dyn Fn(Arc<Mutex<Game>>, Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = bool> + Send>>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
+        Self {
+            id: Ulid::new().to_string(),
+            trigger_type,
+            card_required_target,
+            action,
+            requirements,
+        }
+    }
+
     pub fn new(
         trigger_type: ActionTriggerType,
         card_required_target: CardRequiredTarget,
         action: Arc<dyn CardAction + Send + Sync>,
     ) -> Self {
         Self {
+            id: Ulid::new().to_string(),
             trigger_type,
             card_required_target,
             action,
+            requirements: Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 card: Arc<Mutex<Card>>|
+                 -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                    Box::pin(async move { true })
+                },
+            ),
         }
     }
 
@@ -305,13 +362,13 @@ impl CardActionTrigger {
         };
 
         match &self.trigger_type {
-            ActionTriggerType::CardTapped => {
+            ActionTriggerType::AbilityWithinPhases(_, _, _, _) => {
                 self.action.apply(game, card, effect_target).await;
             }
             ActionTriggerType::Attached => {
                 self.action.apply(game, card, effect_target).await;
             }
-            ActionTriggerType::CardInPlay => {
+            ActionTriggerType::CardPlayedFromHand => {
                 self.action.apply(game, card, effect_target).await;
             }
             x => {
@@ -351,6 +408,9 @@ impl AsyncClosureWithCardAction {
 
 #[async_trait::async_trait]
 impl CardAction for AsyncClosureWithCardAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, source_card: Arc<Mutex<Card>>, target: EffectTarget) {
         if let EffectTarget::Card(target_card) = target {
             let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
@@ -390,6 +450,9 @@ impl AsyncClosureAction {
 
 #[async_trait::async_trait]
 impl CardAction for AsyncClosureAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, source_card: Arc<Mutex<Card>>, target: EffectTarget) {
         let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
 
@@ -421,12 +484,13 @@ pub enum CardRequiredTarget {
     EnemyCard,
     EnemyPlayer,
     EnemyCardOrPlayer,
-    CardOfType(CardType),
-    CreatureOfType(CreatureType),
+    CardOfType(CardType, CardTargetTeam),
+    CreatureOfType(CreatureType, CardTargetTeam),
     EnemyCardInCombat,
     Spell,
     MultipleCardsOfType(CardType, i8),
 }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub enum CardActionTarget {
     SelfCard,
@@ -435,9 +499,16 @@ pub enum CardActionTarget {
     EffectTarget,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub enum CardTargetTeam {
+    Owner,
+    Opponent,
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub enum PlayerActionTarget {
-    SelfPlayer,
+    Owner,
     Opponent,
 }
 
@@ -453,21 +524,25 @@ pub enum CardActionType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionTriggerType {
-    CardInPlay,
+    CardPlayedFromHand,
     CardDestroyed,
-    CardTapped,
-    CardTappedWithinPhases(Vec<TurnPhase>),
-    ActionedWithinPhases(Vec<ManaType>, Vec<TurnPhase>),
+    // CardTapped,
+    // CardTappedWithinPhases(Vec<TurnPhase>),
+    // description, required mana, required phase(s), requires tap
+    AbilityWithinPhases(String, Vec<ManaType>, Option<Vec<TurnPhase>>, bool),
     PhaseStarted(Vec<TurnPhase>, TriggerTarget),
     OtherCardPlayed(TriggerTarget),
+    CreatureTypeCardPlayed(TriggerTarget, CreatureType),
     DamageApplied,
     Attached,
     Detached,
+    Continuous,
 }
 
 #[async_trait::async_trait]
-pub trait CardAction: Send + Sync + Debug {
+pub trait CardAction: Send + Sync + Debug + 'static {
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget);
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Clone)]
@@ -578,7 +653,7 @@ pub struct DrawCardAction {
 impl PlayerAction for DrawCardAction {
     async fn apply(&self, game: &mut Game, player_index: usize) {
         match self.target {
-            PlayerActionTarget::SelfPlayer => {
+            PlayerActionTarget::Owner => {
                 game.players[player_index].lock().await.draw_card();
             }
             PlayerActionTarget::Opponent => {
@@ -610,6 +685,9 @@ pub struct CardDamageAction {
 
 #[async_trait]
 impl CardAction for CardDamageAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         let card = card.lock().await;
         // let target = &card.target;
@@ -636,6 +714,9 @@ pub struct DestroyTargetCAction {}
 
 #[async_trait]
 impl CardAction for DestroyTargetCAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         match target {
             EffectTarget::Card(target_card) => {
@@ -653,6 +734,9 @@ pub struct DeclareBlockerAction {}
 
 #[async_trait::async_trait]
 impl CardAction for DeclareBlockerAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         match target {
             EffectTarget::Player(arc) => todo!(),
@@ -684,6 +768,9 @@ pub struct DeclareAttackerAction {}
 
 #[async_trait::async_trait]
 impl CardAction for DeclareAttackerAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         println!(
             "declaring \n\nattacker: {:?} \ntarget: {:?}\n\n",
@@ -844,5 +931,462 @@ impl DamageTarget for Player {
         // Reduce player's health
         self.modify_stat(StatType::Health, -amount);
         println!("{} takes {} damage.", self.name, amount);
+    }
+}
+
+pub struct ApplyDynamicEffectToCard {
+    pub id: String,
+    pub amount_calculator:
+        Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync>,
+    pub effects_generator: Arc<
+        dyn Fn(
+                EffectTarget,
+                Arc<Mutex<Card>>,
+                Arc<
+                    dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                        + Send
+                        + Sync,
+                >,
+                String,
+            )
+                -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl ApplyDynamicEffectToCard {
+    pub fn new(
+        amount_calculator: Arc<
+            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync,
+        >,
+        effects_generator: Arc<
+            dyn Fn(
+                    EffectTarget,
+                    Arc<Mutex<Card>>,
+                    Arc<
+                        dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                            + Send
+                            + Sync,
+                    >,
+                    String,
+                ) -> Pin<
+                    Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                > + Send
+                + Sync,
+        >,
+    ) -> Self {
+        ApplyDynamicEffectToCard {
+            amount_calculator,
+            effects_generator,
+            id: Ulid::new().to_string(),
+        }
+    }
+}
+
+impl Debug for ApplyDynamicEffectToCard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyDynamicEffectToCard").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyDynamicEffectToCard {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        // let amount_calculator = Arc::clone(&self.amount_calculator);
+        // let amount = (&amount_calculator)(Arc::clone(&card_arc)).await;
+        // if amount == 0 {
+        // println!("hmmm, 0 amount?zc:");
+        // }
+        let effects = {
+            let source_card = Arc::clone(&card_arc);
+
+            // let owner = { &source_card.lock().await.owner.clone() };
+
+            (self.effects_generator)(
+                target,
+                source_card,
+                self.amount_calculator.clone(),
+                self.id.clone(),
+            )
+            .await
+        };
+
+        for effect in effects {
+            let effect_id = effect.lock().await.get_final_id();
+            // println!("received effect from list {:?}", effect_id);
+
+            game.effect_manager.add_effect(effect_id, effect);
+        }
+    }
+}
+
+pub struct ApplyEffectToCardBasedOnTotalCardType {
+    pub card_type: CardType,
+    pub effects_generator: Arc<
+        dyn Fn(
+                EffectTarget,
+                Option<Arc<Mutex<Card>>>,
+                Arc<
+                    dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                        + Send
+                        + Sync,
+                >,
+            ) -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToCardBasedOnTotalCardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToCardBasedOnTotalCardType")
+            .finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToCardBasedOnTotalCardType {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        println!(
+            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
+            card_arc, target
+        );
+        let owner_arc = {
+            let card = card_arc.lock().await;
+            card.owner.clone()
+        };
+
+        if let Some(_) = owner_arc {
+            let source_card = Some(Arc::clone(&card_arc));
+            let target = { card_arc.lock().await.attached.clone() };
+
+            if let Some(target_arc) = target {
+                let card_type = self.card_type;
+                let amount_calculator = {
+                    Arc::new(move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
+                        Box::pin(async move {
+                            let mut total = 0;
+
+                            let (card_type, owner) = {
+                                let card =card_arc.lock().await;
+                                let owner = card.owner.clone();
+                                ( card_type, owner )
+                            };
+
+                            if let Some(owner_arc) = owner {
+
+                                let owner = owner_arc.lock().await;
+                                for card_in_play in &owner.cards_in_play {
+                                    let card_type_matches = {
+                                        let card = card_in_play.lock().await;
+                                        card.card_type == card_type
+                                    };
+
+                                    if card_type_matches {
+                                        total += 1;
+                                    }
+                                }
+                            }
+                            total
+                        })
+                    })
+                };
+
+                let effects = (self.effects_generator)(
+                    EffectTarget::Card(target_arc),
+                    source_card,
+                    amount_calculator,
+                );
+
+                for effect in effects {
+                    let effect_id = effect.lock().await.get_final_id();
+                    // println!("received effect from list {:?}", effect_id);
+
+                    game.effect_manager.add_effect(effect_id, effect);
+                }
+            } else {
+                println!("OH NO, NO ATTACHED CARD ON {}", &card_arc.lock().await.name);
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
+    }
+}
+
+pub struct ApplyEffectToPlayerCreatureType {
+    pub creature_type: CreatureType,
+    pub effect_generator: Arc<
+        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToPlayerCreatureType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToPlayerCreatureType").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToPlayerCreatureType {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        println!(
+            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
+            card_arc, target
+        );
+        let owner_arc = {
+            let card = card_arc.lock().await;
+            card.owner.clone()
+        };
+
+        if let Some(owner_arc) = owner_arc {
+            let owner = owner_arc.lock().await;
+
+            // Iterate over the owner's in-play cards and apply the effect to matching card types
+            for card_in_play in &owner.cards_in_play {
+                let card_type_matches = {
+                    let card = card_in_play.lock().await;
+                    card.creature_type == Some(self.creature_type)
+                };
+
+                if card_type_matches {
+                    let source_card = Some(Arc::clone(&card_arc));
+                    let effect = (self.effect_generator)(
+                        EffectTarget::Card(Arc::clone(&card_in_play)),
+                        source_card,
+                    );
+                    let effect_id = effect.lock().await.get_final_id();
+
+                    game.effect_manager.add_effect(effect_id, effect);
+                } else {
+                    // println!("Card does not match card type {:?}", self.card_type);
+                }
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
+    }
+}
+
+pub struct ApplyEffectToPlayerCardType {
+    pub card_type: CardType,
+    pub effect_generator: Arc<
+        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToPlayerCardType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToPlayerCardType").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToPlayerCardType {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        println!(
+            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
+            card_arc, target
+        );
+        let owner_arc = {
+            let card = card_arc.lock().await;
+            card.owner.clone()
+        };
+
+        if let Some(owner_arc) = owner_arc {
+            let owner = owner_arc.lock().await;
+
+            // Iterate over the owner's in-play cards and apply the effect to matching card types
+            for card_in_play in &owner.cards_in_play {
+                let card_type_matches = {
+                    let card = card_in_play.lock().await;
+                    card.card_type == self.card_type
+                };
+
+                if card_type_matches {
+                    let source_card = Some(Arc::clone(&card_arc));
+                    let effects = (self.effect_generator)(
+                        EffectTarget::Card(Arc::clone(&card_in_play)),
+                        source_card,
+                    );
+
+                    for effect in effects {
+                        let effect_id = effect.lock().await.get_final_id();
+
+                        game.effect_manager.add_effect(effect_id, effect);
+                    }
+                } else {
+                    // println!("Card does not match card type {:?}", self.card_type);
+                }
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
+    }
+}
+
+pub struct ApplyEffectToTargetAction {
+    pub effect_generator: Arc<
+        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for ApplyEffectToTargetAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplyEffectToTargetAction").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for ApplyEffectToTargetAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        let target = {
+            let card = card_arc.lock().await;
+            card.target.clone()
+        }; // Lock is released here
+
+        if let Some(target) = target {
+            let source_card = Some(Arc::clone(&card_arc)); // Set the source card
+            let effect = (self.effect_generator)(target.clone(), source_card);
+            let effect_id = effect.lock().await.get_final_id();
+            println!("Adding effect {:?} to card {:?}", effect, target);
+
+            game.effect_manager.add_effect(effect_id, effect);
+        } else {
+            println!("No target specified for card action.");
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DrawCardCardAction {
+    pub target: CardActionTarget,
+    pub count: i8,
+}
+
+impl DrawCardCardAction {
+    pub fn one(target: CardActionTarget) -> Self {
+        DrawCardCardAction { target, count: 1 }
+    }
+}
+
+#[async_trait::async_trait]
+impl CardAction for DrawCardCardAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        let card = card_arc.lock().await;
+        let owner = card.owner.as_ref().unwrap();
+        for _ in 0..self.count {
+            owner.lock().await.draw_card();
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CastMandatoryAdditionalAbility {
+    pub mana: Vec<ManaType>,
+    pub target: CardRequiredTarget,
+    pub ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+    pub description: String,
+    pub action_type: ActionType,
+}
+impl Debug for CastMandatoryAdditionalAbility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CastMandatoryAdditionalAbility").finish()
+    }
+}
+
+#[async_trait]
+impl CardAction for CastMandatoryAdditionalAbility {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        let owner = card_arc.lock().await.owner.clone();
+
+        if let Some(owner_arc) = owner {
+            let can_pay_mana_cost = { owner_arc.lock().await.can_pay_mana(&self.mana).await };
+            if can_pay_mana_cost {
+                game.ask_mandatory_player_ability(Ability::new(
+                    card_arc.clone(),
+                    self.mana.clone(),
+                    self.target.clone(),
+                    self.ability.clone(),
+                    self.description.clone(),
+                    self.action_type.clone(),
+                ))
+                .await;
+            } else {
+                println!("Not enough mana to activate the ability.");
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CastOptionalAdditionalAbility {
+    pub mana: Vec<ManaType>,
+    pub target: CardRequiredTarget,
+    pub ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+    pub description: String,
+    pub action_type: ActionType,
+}
+impl Debug for CastOptionalAdditionalAbility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CastOptionalAdditionalAbility").finish()
+    }
+}
+
+#[async_trait]
+impl CardAction for CastOptionalAdditionalAbility {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
+        let owner = card_arc.lock().await.owner.clone();
+
+        if let Some(owner_arc) = owner {
+            let can_pay_mana_cost = { owner_arc.lock().await.can_pay_mana(&self.mana).await };
+            if can_pay_mana_cost {
+                game.request_player_ability(Ability::new(
+                    card_arc.clone(),
+                    self.mana.clone(),
+                    self.target.clone(),
+                    self.ability.clone(),
+                    self.description.clone(),
+                    self.action_type.clone(),
+                ))
+                .await;
+            } else {
+                println!("Not enough mana to activate the ability.");
+            }
+        } else {
+            println!("No owner found for the card.");
+        }
     }
 }

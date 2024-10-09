@@ -19,7 +19,23 @@ use crate::{
 };
 
 #[derive(Type, Serialize, Deserialize)]
+pub struct RespondMandatoryAbility {
+    pub code: String,
+    pub target: Option<FrontendTarget>,
+    pub ability_id: String,
+}
+
+#[derive(Type, Serialize, Deserialize)]
+pub struct RespondOptionalAbility {
+    pub code: String,
+    pub target: Option<FrontendTarget>,
+    pub ability_id: String,
+    pub response: bool,
+}
+
+#[derive(Type, Serialize, Deserialize)]
 pub struct ActionCardArgs {
+    pub trigger_id: String,
     pub code: String,
     pub player_index: i32,
     pub in_play_index: i32,
@@ -126,7 +142,6 @@ impl LobbyController {
             .ok_or(AppError::BadRequest(
                 "Bad lobby id or not your turn".to_string(),
             ))?;
-        println!("done.");
 
         Ok(())
     }
@@ -134,7 +149,6 @@ impl LobbyController {
     pub(crate) async fn action_card(ctx: Ctx, args: ActionCardArgs) -> AppResult<()> {
         let user = ctx.required_user()?;
         ctx.lobby_manager.action_card(args, user).await?;
-        println!("done.");
 
         Ok(())
     }
@@ -142,7 +156,18 @@ impl LobbyController {
     pub(crate) async fn attach_card(ctx: Ctx, args: ActionCardArgs) -> AppResult<()> {
         let user = ctx.required_user()?;
         ctx.lobby_manager.attach_card(args, user).await?;
-        println!("done.");
+
+        Ok(())
+    }
+
+    pub(crate) async fn respond_optional_ability(
+        ctx: Ctx,
+        args: RespondOptionalAbility,
+    ) -> AppResult<()> {
+        let user = ctx.required_user()?;
+        ctx.lobby_manager
+            .respond_optional_player_ability(args, user)
+            .await?;
 
         Ok(())
     }
@@ -150,7 +175,6 @@ impl LobbyController {
     pub(crate) async fn play_card(ctx: Ctx, args: PlayCardArgs) -> AppResult<()> {
         let user = ctx.required_user()?;
         ctx.lobby_manager.play_card(args, user).await?;
-        println!("done.");
 
         Ok(())
     }
@@ -161,7 +185,7 @@ impl LobbyController {
             .join_lobby(&join_code, user)
             .await
             .ok_or(AppError::BadRequest("Bad lobby id".to_string()))?;
-        println!("done.");
+        ctx.lobby_manager.notify_lobby(&join_code).await.ok();
 
         Ok(())
     }
@@ -181,7 +205,6 @@ impl LobbyController {
         println!("added, notifying lobby");
         // lobby.lock().await.message(user, args.text);
         ctx.lobby_manager.notify_lobby(&args.lobby_id).await.ok();
-        println!("done.");
 
         Ok(())
     }
@@ -194,14 +217,39 @@ impl LobbyController {
         let manager = Arc::clone(&ctx.lobby_manager);
         let user_claims = JwtService::decode(&access_token).unwrap().claims;
 
-        stream! {
+        let async_stream = stream! {
             if let Ok(mut post_stream) = manager.subscribe_to_lobby_updates(join_code, access_token).await {
                 while let Some(mut lobby_data) = post_stream.next().await {
-                    personalize_lobby_data_for_player(&mut lobby_data, &user_claims.sub);
+                        match &lobby_data {
+                            LobbyCommand::AskExecuteAbility(ability_details) => {
+                                if ability_details.player_id == user_claims.sub.clone() {
+                                    yield lobby_data;
+                                }
+                            },
+                            _ => {
+                                personalize_lobby_data_for_player(&mut lobby_data, &user_claims.sub);
 
-                    yield lobby_data;
+                                yield lobby_data;
+                            }
+                        }
+
+
                 }
             }
-        }
+        };
+        let async_stream = async_stream;
+        async_stream
+    }
+
+    pub(crate) async fn respond_mandatory_ability(
+        ctx: Ctx,
+        args: RespondMandatoryAbility,
+    ) -> AppResult<()> {
+        let user = ctx.required_user()?;
+        ctx.lobby_manager
+            .respond_mandatory_player_ability(args, user)
+            .await?;
+
+        Ok(())
     }
 }

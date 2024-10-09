@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use tokio::sync::Mutex;
 
@@ -19,6 +19,9 @@ pub struct CardAddStatAction {
 
 #[async_trait::async_trait]
 impl CardAction for CardAddStatAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;

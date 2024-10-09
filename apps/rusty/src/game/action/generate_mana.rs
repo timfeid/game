@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use tokio::sync::Mutex;
 
@@ -16,6 +16,9 @@ pub struct GenerateManaAction {
 
 #[async_trait::async_trait]
 impl CardAction for GenerateManaAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
         let owner = card.lock().await.owner.clone().unwrap();
         let player = &mut owner.lock().await;

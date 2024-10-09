@@ -35,6 +35,7 @@ use super::{
 pub enum CreatureType {
     None,
     Angel,
+    Elf,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Type)]
@@ -137,15 +138,14 @@ impl Card {
             .triggers
             .iter()
             .filter(|t| match &t.trigger_type {
-                ActionTriggerType::CardTapped => true,
-                ActionTriggerType::CardTappedWithinPhases(vec) => true,
-                ActionTriggerType::ActionedWithinPhases(vec, vec1) => true,
+                ActionTriggerType::CardPlayedFromHand => true,
+                ActionTriggerType::AbilityWithinPhases(_, _, _, _) => true,
                 ActionTriggerType::PhaseStarted(vec, trigger_target) => true,
+                ActionTriggerType::CreatureTypeCardPlayed(trigger_target, creature_type) => true,
                 ActionTriggerType::Attached => true,
                 ActionTriggerType::DamageApplied => true,
                 ActionTriggerType::OtherCardPlayed(_) => true,
-
-                ActionTriggerType::CardInPlay => false,
+                ActionTriggerType::Continuous => false,
                 ActionTriggerType::Detached => false,
                 ActionTriggerType::CardDestroyed => false,
             })
@@ -234,7 +234,7 @@ impl Card {
         actions
     }
 
-    pub async fn collect_manual_actions(
+    pub async fn collect_manual_actions_old(
         &self,
         card_arc: Arc<Mutex<Card>>,
         turn_phase: TurnPhase,
@@ -245,16 +245,17 @@ impl Card {
 
         for action_trigger in &self.triggers {
             match &action_trigger.trigger_type {
-                ActionTriggerType::CardTapped => {
-                    requires_tap = true;
-                    actions.push(Arc::new(CardActionWrapper {
-                        card: Arc::clone(&card_arc),
-                        action: action_trigger.action.clone(),
-                        target: target.clone(),
-                    }));
-                }
-                ActionTriggerType::ActionedWithinPhases(mana_requirements, allowed_phases) => {
-                    if allowed_phases.contains(&turn_phase) {
+                ActionTriggerType::AbilityWithinPhases(
+                    _,
+                    mana_requirements,
+                    allowed_phases,
+                    tap_required,
+                ) => {
+                    let in_phases = allowed_phases.is_none()
+                        || allowed_phases.as_ref().unwrap().contains(&turn_phase);
+
+                    if in_phases {
+                        requires_tap = tap_required.clone();
                         actions.push(Arc::new(CardActionWrapper {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
@@ -262,9 +263,48 @@ impl Card {
                         }));
                     }
                 }
-                ActionTriggerType::CardTappedWithinPhases(allowed_phases) => {
-                    if allowed_phases.contains(&turn_phase) {
-                        requires_tap = true;
+                _ => {}
+            }
+        }
+
+        (actions, requires_tap)
+    }
+
+    pub async fn collect_manual_actions(
+        card_arc: Arc<Mutex<Card>>,
+        turn_phase: TurnPhase,
+        target: Option<EffectTarget>,
+        trigger_id: String,
+        game: Arc<Mutex<Game>>,
+    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool) {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+        let mut requires_tap = false;
+
+        let triggers = { card_arc.lock().await.triggers.clone() };
+        for action_trigger in &triggers {
+            match &action_trigger.trigger_type {
+                ActionTriggerType::AbilityWithinPhases(
+                    _,
+                    mana_requirements,
+                    allowed_phases,
+                    tap_required,
+                ) => {
+                    if trigger_id != action_trigger.id {
+                        continue;
+                    }
+                    println!("we were triggered");
+                    let in_phases = allowed_phases.is_none()
+                        || allowed_phases.as_ref().unwrap().contains(&turn_phase);
+
+                    println!("getting requirements game: {:?} card: {:?}", game, card_arc);
+                    let meets_requirements =
+                        (action_trigger.requirements)(Arc::clone(&game), Arc::clone(&card_arc))
+                            .await;
+
+                    println!("here is where it matters: {}", meets_requirements);
+
+                    if in_phases && meets_requirements {
+                        requires_tap = tap_required.clone();
                         actions.push(Arc::new(CardActionWrapper {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
@@ -325,7 +365,7 @@ impl Card {
                     action: action_trigger.action.clone(),
                     target: None,
                 }));
-            } else if action_trigger.trigger_type == ActionTriggerType::CardInPlay
+            } else if action_trigger.trigger_type == ActionTriggerType::CardPlayedFromHand
                 && trigger_type != ActionTriggerType::CardDestroyed
             {
                 // println!("EXECUTING THIS {}", name);
@@ -486,16 +526,17 @@ pub mod card {
                     $description,
                     {
                         // Start with the default triggers
+                        #[allow(unused_mut)]
                         let mut triggers = vec![
                             // Action to declare the creature as an attacker in the Declare Attackers phase
                             CardActionTrigger::new(
-                                ActionTriggerType::CardTappedWithinPhases(vec![TurnPhase::DeclareAttackers]),
+                                ActionTriggerType::AbilityWithinPhases("Attack".to_string(), vec![], Some(vec![TurnPhase::DeclareAttackers]), true),
                                 CardRequiredTarget::EnemyCardOrPlayer,
                                 Arc::new(DeclareAttackerAction {}),
                             ),
                             // Action to manually declare the creature as a blocker in the Declare Blockers phase
                             CardActionTrigger::new(
-                                ActionTriggerType::ActionedWithinPhases(vec![], vec![TurnPhase::DeclareBlockers]),
+                                ActionTriggerType::AbilityWithinPhases("Block".to_string(), vec![], Some(vec![TurnPhase::DeclareBlockers]), false),
                                 CardRequiredTarget::EnemyCardInCombat,
                                 Arc::new(DeclareBlockerAction {}),
                             ),

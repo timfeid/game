@@ -1,17 +1,15 @@
 use crate::game::{
     action::{
-        generate_mana::GenerateManaAction, ActionTriggerType, AsyncClosureAction,
-        AsyncClosureWithCardAction, CardActionTrigger, CardRequiredTarget, DeclareAttackerAction,
+        generate_mana::GenerateManaAction, ActionTriggerType, ApplyDynamicEffectToCard,
+        ApplyEffectToCardBasedOnTotalCardType, AsyncClosureAction, AsyncClosureWithCardAction,
+        CardActionTrigger, CardRequiredTarget, CardTargetTeam, DeclareAttackerAction,
         DeclareBlockerAction, PlayerActionTarget, TriggerTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
         Card, CardPhase, CardType, CreatureType,
     },
-    effects::{
-        ApplyDynamicEffectToCard, ApplyEffectToCardBasedOnTotalCardType, DynamicStatModifierEffect,
-        Effect, EffectID, EffectTarget, ExpireContract,
-    },
+    effects::{DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract},
     mana::ManaType,
     player::Player,
     stat::{Stat, StatType, Stats},
@@ -23,16 +21,23 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
+use super::duplicate_card;
+
 fn create_plains() -> Card {
     Card::new(
         "Plains",
-        "TAP: Adds 1 white mana to your pool.",
+        "",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardTapped,
+            ActionTriggerType::AbilityWithinPhases(
+                "Adds {W} white mana to your pool.".to_string(),
+                vec![],
+                None,
+                true,
+            ),
             CardRequiredTarget::None,
             Arc::new(GenerateManaAction {
                 mana_to_add: vec![ManaType::White],
-                target: PlayerActionTarget::SelfPlayer,
+                target: PlayerActionTarget::Owner,
             }),
         )],
         CardPhase::Ready,
@@ -45,21 +50,11 @@ fn create_plains() -> Card {
 pub fn create_angels_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
     // deck.push();
-    deck.append(&mut create_multiple_cards(create_righteous_valkyrie(), 4));
-    deck.append(&mut create_multiple_cards(create_angelic_accord(), 4));
-    deck.append(&mut create_multiple_cards(create_plains(), 12));
+    deck.append(&mut duplicate_card(create_righteous_valkyrie(), 4));
+    deck.append(&mut duplicate_card(create_angelic_accord(), 4));
+    deck.append(&mut duplicate_card(create_plains(), 12));
 
     deck
-}
-
-fn create_multiple_cards(base_card: Card, count: usize) -> Vec<Card> {
-    let mut cards = Vec::new();
-    for i in 0..count {
-        let mut card = base_card.clone();
-        card.id = format!("{}-{}-{}", card.name, i, card.id);
-        cards.push(card);
-    }
-    cards
 }
 
 fn create_angelic_accord() -> Card {
@@ -73,7 +68,6 @@ fn create_angelic_accord() -> Card {
                 Arc::new(AsyncClosureAction::new(Arc::new(
                     |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = ()> + Send>> {
                         Box::pin(async move {
-                            println!("hi there");
                             let (difference, owner) = {
 
                             let card = card.lock().await;
@@ -92,19 +86,19 @@ fn create_angelic_accord() -> Card {
             ),
             CardActionTrigger::new(
                 ActionTriggerType::Attached,
-                CardRequiredTarget::CardOfType(CardType::Creature),
+                CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any),
                 Arc::new(ApplyEffectToCardBasedOnTotalCardType {
                     card_type: CardType::BasicLand(ManaType::Green),
 
-                    effect_generator: Arc::new(|target, source_card, amount_calculator| {
-                        Arc::new(Mutex::new(DynamicStatModifierEffect::new(
+                    effects_generator: Arc::new(|target, source_card, amount_calculator| {
+                        vec![Arc::new(Mutex::new(DynamicStatModifierEffect::new(
                             target,
                             StatType::Toughness,
                             amount_calculator.clone(),
                             ExpireContract::Never,
                             source_card.clone(),
                             false,
-                        )))
+                        )))]
                     }),
                 }),
             ),
@@ -128,7 +122,7 @@ fn create_righteous_valkyrie() -> Card {
         [],
         [StatType::Flying],
         CardActionTrigger::new(
-            ActionTriggerType::CardInPlay,
+            ActionTriggerType::Continuous,
             CardRequiredTarget::None,
             Arc::new(ApplyDynamicEffectToCard::new(Arc::new(
                     move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
@@ -238,13 +232,13 @@ mod test {
 
     use crate::game::{
         decks::{
-            angels::{create_angelic_accord, create_multiple_cards, create_righteous_valkyrie},
+            duplicate_card,
+            white::{create_angelic_accord, create_righteous_valkyrie},
             Deck,
         },
         effects::EffectTarget,
         mana,
         player::Player,
-        test::create_angels_deck,
         Game,
     };
 
@@ -259,7 +253,7 @@ mod test {
             .add_player(Player::new(
                 "test",
                 0,
-                create_multiple_cards(create_righteous_valkyrie(), 4),
+                duplicate_card(create_righteous_valkyrie(), 4),
             ))
             .await;
 

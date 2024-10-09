@@ -3,12 +3,19 @@
 	import { page } from '$app/stores';
 	import { client, websocketClient } from '$lib/client';
 	import { accessToken } from '$lib/stores/access-token';
-	import type { LobbyCommand, LobbyData, LobbyTurnMessage } from '@gangsta/rusty';
+	import type {
+		AbilityDetails,
+		ExecuteAbility,
+		LobbyCommand,
+		LobbyData,
+		LobbyTurnMessage
+	} from '@gangsta/rusty';
 	import { Loader } from 'lucide-svelte';
 	import { type ComponentType } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import InGame from './InGame.svelte';
 	import Lobby from './Lobby.svelte';
+	import { askOptionalAbility, mandatoryAbility } from '../../stores/dialog';
 
 	let lobby: LobbyData | undefined;
 	let unsubscribe: (() => void) | undefined;
@@ -18,12 +25,32 @@
 		reset($accessToken);
 	}
 
+	function isMandatoryExecuteAbility(
+		data: LobbyCommand
+	): data is { MandatoryExecuteAbility: ExecuteAbility } {
+		return 'MandatoryExecuteAbility' in data;
+	}
+
+	function isAskExecuteAbility(data: LobbyCommand): data is { AskExecuteAbility: ExecuteAbility } {
+		return 'AskExecuteAbility' in data;
+	}
+
 	function isTurnMessages(data: LobbyCommand): data is { TurnMessages: LobbyTurnMessage } {
 		return 'TurnMessages' in data;
 	}
 
 	function isUpdated(data: LobbyCommand): data is { Updated: LobbyData } {
 		return 'Updated' in data;
+	}
+
+	function askMandatoryAbility(updatedMessage: ExecuteAbility) {
+		console.log('MAND');
+		mandatoryAbility.set(updatedMessage);
+	}
+
+	function askExecuteAbility(updatedMessage: ExecuteAbility) {
+		console.log('OPTION');
+		askOptionalAbility.set(updatedMessage);
 	}
 
 	function turnMessageReceived(updatedMessage: LobbyTurnMessage) {
@@ -42,10 +69,17 @@
 			['lobby.subscribe', [$page.params.slug, accessToken]],
 			{
 				onData(data) {
-					console.log(data);
+					// console.log(data);
 					if (isUpdated(data)) {
 						return updated(data.Updated);
 					}
+					if (isAskExecuteAbility(data)) {
+						return askExecuteAbility(data.AskExecuteAbility);
+					}
+					if (isMandatoryExecuteAbility(data)) {
+						return askMandatoryAbility(data.MandatoryExecuteAbility);
+					}
+
 					if (isTurnMessages(data)) {
 						return turnMessageReceived(data.TurnMessages);
 					}

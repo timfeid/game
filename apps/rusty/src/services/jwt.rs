@@ -39,7 +39,7 @@ impl JwtService {
             jti,
             sub: user.get_id().to_string(),
             exp: get_current_timestamp().add(match is_access_token {
-                &true => 1,
+                &true => 3600,
                 &false => 604800,
             }),
         };

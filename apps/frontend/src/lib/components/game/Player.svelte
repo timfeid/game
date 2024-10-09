@@ -18,15 +18,25 @@
 
 	$: self = game.players[$user?.sub || ''];
 
-	async function executeAction(index: number, card: CardWithDetails, target?: FrontendTarget) {
+	async function executeAction(
+		index: number,
+		card: CardWithDetails,
+		target: FrontendTarget | null
+	) {
+		let action = card.abilities[0]?.action_type;
+		console.log(action);
+		if (!action) {
+			return;
+		}
 		try {
 			await client.mutation([
-				card.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
+				action === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
 				{
 					code,
 					player_index: player.player_index,
 					in_play_index: index,
-					target: target || null
+					target,
+					trigger_id: card.abilities[0].id
 				}
 			]);
 		} catch (e) {
@@ -47,7 +57,7 @@
 		}
 		const card = player.public_info.cards_in_play[index];
 		if (self.player_index === player.player_index) {
-			const target = await waitForTarget(card, game);
+			const target = await waitForTarget(card.abilities[0], game);
 			return await executeAction(index, card, target);
 		}
 	}
@@ -63,7 +73,12 @@
 		const card = player.public_info.cards_in_play[index];
 		if (self.player_index === player.player_index) {
 			try {
-				const target = await waitForTarget(card, game);
+				const ability = card.abilities.find((a) => a.meets_requirements) || null;
+				if (!ability) {
+					throw new Error('This card has no ability right now.');
+				}
+
+				const target = await waitForTarget(ability, game);
 				await executeAction(index, card, target);
 			} catch (e) {
 				toast.error((e as Error).toString());
