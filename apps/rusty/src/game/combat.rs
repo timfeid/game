@@ -5,7 +5,7 @@ use super::{
     player::Player,
     Game,
 };
-use crate::game::stat::{Stat, StatType, Stats};
+use crate::game::stat::{Stat, StatType, StaticStatId, Stats};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ulid::Ulid;
@@ -64,8 +64,13 @@ impl Combat {
 
                 // Check if blocker is destroyed
                 if blocker_card.damage_taken >= blocker_toughness {
-                    println!("Blocker {} is destroyed!", blocker_card.name);
-                    destroyed_cards.push(Arc::clone(&blocking_card_arc));
+                    if blocker_card.get_stat_value(StatType::Regenerate) > 0 {
+                        blocker_card.damage_taken = 0;
+                        blocker_card.tapped = true;
+                        blocker_card.remove_stat(StaticStatId::Regenerate.to_string());
+                    } else {
+                        destroyed_cards.push(Arc::clone(attacker_card_arc));
+                    }
                 }
             }
 
@@ -91,7 +96,13 @@ impl Combat {
                 // Check if attacker is destroyed
                 if attacker_card.damage_taken >= attacker_toughness {
                     println!("Attacker {} is destroyed!", attacker_card.name);
-                    destroyed_cards.push(Arc::clone(attacker_card_arc));
+                    if attacker_card.get_stat_value(StatType::Regenerate) > 0 {
+                        attacker_card.damage_taken = 0;
+                        attacker_card.tapped = true;
+                        attacker_card.remove_stat(StaticStatId::Regenerate.to_string());
+                    } else {
+                        destroyed_cards.push(Arc::clone(attacker_card_arc));
+                    }
                 }
             }
         }

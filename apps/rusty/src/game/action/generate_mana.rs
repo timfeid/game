@@ -19,7 +19,13 @@ impl CardAction for GenerateManaAction {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
+    async fn apply(
+        &self,
+        game: &mut Game,
+        card: Arc<Mutex<Card>>,
+        target: EffectTarget,
+        ability_id: Option<String>,
+    ) {
         let owner = card.lock().await.owner.clone().unwrap();
         let player = &mut owner.lock().await;
         for mana in &self.mana_to_add {

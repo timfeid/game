@@ -3,6 +3,8 @@ use std::{
     cell::{RefCell, RefMut},
     collections::{HashMap, HashSet},
     fmt,
+    future::Future,
+    pin::Pin,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -80,8 +82,6 @@ pub struct Player {
     pub health_at_start_of_round: i8,
     #[serde(skip_serializing, skip_deserializing)]
     pub spells: Vec<Arc<Mutex<Card>>>,
-    #[serde(skip_serializing, skip_deserializing)]
-    pub triggers_played_this_turn: HashSet<String>,
 }
 
 impl fmt::Display for Player {
@@ -99,7 +99,6 @@ impl Player {
 
     pub fn new(name: &str, health: i8, deck: Vec<Card>) -> Self {
         let mut player = Self {
-            triggers_played_this_turn: HashSet::new(),
             name: name.to_string(),
             stat_manager: StatManager::new(vec![Stat::new(StatType::Health, health)]),
             is_alive: true,
@@ -494,6 +493,22 @@ impl Player {
         Ok(actions)
     }
 
+    pub async fn filter_cards_in_play(
+        &self,
+        closure: Arc<
+            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync,
+        >,
+    ) -> Vec<Arc<Mutex<Card>>> {
+        let mut cards = vec![];
+        for card_arc in &self.cards_in_play {
+            if (closure)(Arc::clone(card_arc)).await {
+                cards.push(Arc::clone(card_arc));
+            }
+        }
+
+        cards
+    }
+
     pub async fn execute_action(
         player: Arc<Mutex<Self>>,
         in_play_index: usize,
@@ -506,11 +521,11 @@ impl Player {
             let phase = game.lock().await.current_turn.as_ref().unwrap().phase;
             // card_l.action_target = target.clone();
 
-            let (actions, requires_tap) = Card::collect_manual_actions(
+            let (actions, requires_tap, mana_requirements) = Card::collect_manual_actions(
                 card.clone(),
                 phase,
                 target.clone(),
-                trigger_id,
+                trigger_id.clone(),
                 game.clone(),
             )
             .await;
@@ -518,6 +533,9 @@ impl Player {
             if requires_tap {
                 card.lock().await.tap()?;
             }
+
+            player.lock().await.pay_mana(&mana_requirements).await;
+
             actions
         };
         println!("{:?}", actions);
@@ -664,21 +682,24 @@ impl Player {
         index: usize,
         target: Option<EffectTarget>,
         current_turn: Turn,
-    ) -> Result<(Arc<dyn Action + Send + Sync>, Arc<Mutex<Card>>), String> {
+    ) -> Result<Arc<Mutex<Card>>, String> {
         // Lock the player to mutate state
         let card_arc = {
-            let mut player = player_arc.lock().await;
-            let card = player
+            let card = player_arc
+                .lock()
+                .await
                 .cards_in_hand
                 .get(index)
                 .ok_or("Invalid card index")?
                 .clone();
 
-            let can_pay_to_cast = player.pool_has_cost_for_card(&card).await;
-            let can_play = player
+            let can_pay_to_cast = player_arc.lock().await.pool_has_cost_for_card(&card).await;
+            let can_play = player_arc
+                .lock()
+                .await
                 .can_play(&card, Arc::ptr_eq(&current_turn.current_player, player_arc))
                 .await;
-            let name = player.name.clone();
+            let name = player_arc.lock().await.name.clone();
 
             if !can_play {
                 return Err(format!(
@@ -697,25 +718,25 @@ impl Player {
             }
 
             // Remove the card from hand
-            player.cards_in_hand.remove(index);
+            player_arc.lock().await.cards_in_hand.remove(index);
 
-            player.spells.push(card.clone());
+            player_arc.lock().await.spells.push(card.clone());
             println!("Added to spells list");
 
             // Pay mana
-            player.pay_mana_for_card(&card).await;
+            player_arc.lock().await.pay_mana_for_card(&card).await;
 
             card
         }; // Lock is released here
 
         // Create the action
-        let action = Arc::new(PlayCardAction::new(
-            player_arc.clone(),
-            card_arc.clone(),
-            target,
-        ));
+        // let action = Arc::new(PlayCardAction::new(
+        //     player_arc.clone(),
+        //     card_arc.clone(),
+        //     target,
+        // ));
 
-        Ok((action, card_arc))
+        Ok(card_arc)
     }
 
     pub fn draw_card(&mut self) -> Option<Arc<Mutex<Card>>> {

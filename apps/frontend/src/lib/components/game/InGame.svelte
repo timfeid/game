@@ -12,6 +12,8 @@
 	import { ArrowBigRight } from 'lucide-svelte';
 	import AskOptionalAbility from './dialog/cast-optional-ability.svelte';
 	import CastMandatoryAbility from './dialog/cast-mandatory-ability.svelte';
+	import SelectAbility from './dialog/select-ability.svelte';
+	import SelectCard from './dialog/select-card.svelte';
 
 	export let game_state: GameState;
 
@@ -91,16 +93,9 @@
 
 	<div class="z-50 sticky bottom-0 left-0 right-0 bg-gray-100 dark:bg-gray-950 border-t mt-4">
 		<div class="container !px-3 relative flex mx-auto py-2">
-			<div class="grid gap-2 grid-cols-7">
+			<div class="grid gap-2 grid-cols-6">
 				{#each self.hand as card, i}
-					<CCard
-						pile="Hand"
-						playerIndex={self.player_index}
-						cardIndex={i}
-						on:click={() => playCard(i)}
-						game={game_state}
-						cardWithDetails={card}
-					></CCard>
+					<CCard on:click={() => playCard(i)} game={game_state} cardWithDetails={card}></CCard>
 				{/each}
 			</div>
 		</div>
@@ -109,3 +104,5 @@
 <!-- <pre>{JSON.stringify(self)}</pre> -->
 <AskOptionalAbility code={join_code} game={game_state} />
 <CastMandatoryAbility code={join_code} game={game_state} />
+<SelectAbility code={join_code} game={game_state} />
+<SelectCard code={join_code} game={game_state} />

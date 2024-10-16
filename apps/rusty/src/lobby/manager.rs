@@ -23,9 +23,12 @@ use crate::game::effects::EffectTarget;
 use crate::game::mana::ManaType;
 use crate::game::player::Player;
 use crate::game::stat::Stats;
-use crate::game::{ActionType, CardWithDetails, FrontendTarget, Game, GameStatus, PlayerStatus};
+use crate::game::{
+    ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
+};
 use crate::http::controllers::lobby::{
-    ActionCardArgs, PlayCardArgs, RespondMandatoryAbility, RespondOptionalAbility,
+    ActionCardArgs, PlayCardArgs, RespondCardSelection, RespondMandatoryAbility,
+    RespondOptionalAbility,
 };
 use crate::services::jwt::{Claims, JwtService};
 
@@ -41,6 +44,13 @@ pub struct LobbyTurnMessage {
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
+pub struct CardSelectionDetails {
+    pub player_id: String,
+    pub cards: Vec<CardWithDetails>,
+    pub valid_card_indexes: Vec<i32>,
+}
+
+#[derive(Type, Deserialize, Clone, Serialize, Debug)]
 pub struct AbilityDetails {
     pub mana_cost: Vec<ManaType>,
     pub required_target: CardRequiredTarget,
@@ -48,7 +58,9 @@ pub struct AbilityDetails {
     pub action_type: ActionType,
     pub show: bool,
     pub id: String,
-    pub meets_requirements: bool,
+    pub meets_requirements_except_mana: bool,
+    pub meets_mana_requirements: bool,
+    pub can_pay_mana: bool,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -67,7 +79,9 @@ impl ExecuteAbility {
         required_target: CardRequiredTarget,
         description: String,
         id: String,
-        meets_requirements: bool,
+        meets_requirements_except_mana: bool,
+        meets_mana_requirements: bool,
+        can_pay_mana: bool,
     ) -> Self {
         Self {
             card,
@@ -78,7 +92,9 @@ impl ExecuteAbility {
                 action_type,
                 show: true,
                 id,
-                meets_requirements,
+                meets_requirements_except_mana,
+                meets_mana_requirements,
+                can_pay_mana,
             },
             player_id,
         }
@@ -94,6 +110,7 @@ pub enum LobbyCommand {
     TurnMessages(LobbyTurnMessage),
     AskExecuteAbility(ExecuteAbility),
     MandatoryExecuteAbility(ExecuteAbility),
+    ChooseFromSelection(CardSelectionDetails),
 }
 
 impl std::fmt::Debug for LobbyManager {
@@ -236,35 +253,18 @@ impl LobbyManager {
     ) -> Option<EffectTarget> {
         match target {
             Some(target) => match target {
-                FrontendTarget::Card(frontend_card_target) => match frontend_card_target.pile {
-                    crate::game::FrontendPileName::Hand => {
-                        let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.lock().await.players
-                                [frontend_card_target.player_index as usize],
-                        );
-                        let card = &player.lock().await.cards_in_hand
-                            [frontend_card_target.card_index as usize];
-                        Some(EffectTarget::Card(Arc::clone(&card)))
-                    }
-                    crate::game::FrontendPileName::Play => {
-                        let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.lock().await.players
-                                [frontend_card_target.player_index as usize],
-                        );
-                        let card = &player.lock().await.cards_in_play
-                            [frontend_card_target.card_index as usize];
-                        Some(EffectTarget::Card(Arc::clone(&card)))
-                    }
-                    crate::game::FrontendPileName::Spell => {
-                        let player = Arc::clone(
-                            &lobby.lock().await.cloned_game().await.lock().await.players
-                                [frontend_card_target.player_index as usize],
-                        );
-                        let card =
-                            &player.lock().await.spells[frontend_card_target.card_index as usize];
-                        Some(EffectTarget::Card(Arc::clone(&card)))
-                    }
-                },
+                FrontendTarget::Card(frontend_card_target) => {
+                    let card = &lobby
+                        .lock()
+                        .await
+                        .cloned_game()
+                        .await
+                        .lock()
+                        .await
+                        .card_from_frontend_target(frontend_card_target)
+                        .await;
+                    Some(EffectTarget::Card(Arc::clone(card)))
+                }
                 FrontendTarget::Player(player_index) => Some(EffectTarget::Player(Arc::clone(
                     &lobby.lock().await.cloned_game().await.lock().await.players
                         [player_index as usize],
@@ -316,6 +316,42 @@ impl LobbyManager {
                     target,
                     args.trigger_id,
                 )
+                .await?;
+            println!("actioned card, notifying lobby");
+        }
+        // lobby.lock().await.message(user, args.text);
+        self.notify_lobby(&lobby_id).await.ok();
+
+        Ok(())
+    }
+
+    pub async fn respond_card_selection(
+        &self,
+        args: RespondCardSelection,
+        user: &Claims,
+    ) -> AppResult<()> {
+        let lobby_id = args.code;
+        {
+            let hash_map = self.lobbies.lock().await;
+            let lobby = hash_map
+                .get(&lobby_id)
+                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let target = { Self::convert(args.target, lobby).await };
+            let player = lobby
+                .lock()
+                .await
+                .data
+                .game_state
+                .players
+                .get(&user.sub)
+                .unwrap()
+                .player
+                .clone();
+
+            lobby
+                .lock()
+                .await
+                .respond_card_selection(player, target)
                 .await?;
             println!("actioned card, notifying lobby");
         }
@@ -415,17 +451,19 @@ impl LobbyManager {
         let lobby_manager_clone = self.clone();
         let lobby_id_clone = lobby_id.clone();
 
-        {
-            let mut game = game_arc.lock().await;
-            game.play_card(&player_arc, args.in_hand_index as usize, target.clone())
-                .await
-                .map_err(|x| AppError::BadRequest(x))?;
-        }
+        Game::play_card(
+            &game_arc,
+            &player_arc,
+            args.in_hand_index as usize,
+            target.clone(),
+        )
+        .await
+        .map_err(|x| AppError::BadRequest(x))?;
 
-        let ga = Arc::clone(&game_arc);
-        tokio::spawn(async move {
-            Game::process_action_queue(ga, card_arc).await;
-        });
+        // let ga = Arc::clone(&game_arc);
+        // tokio::spawn(async move {
+        //     Game::process_action_queue(ga, card_arc).await;
+        // });
 
         // Return immediately
         Ok(())
@@ -477,21 +515,16 @@ impl LobbyManager {
                     let player_cards_in_hand = &player.player.lock().await.cards_in_hand.clone();
 
                     for card in player_cards_in_play {
-                        cards_in_play.push(
-                            CardWithDetails::from_card_arc(card, phase.clone(), true, &game).await,
-                        );
+                        cards_in_play
+                            .push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
                     }
 
                     for card in player_spells {
-                        spells.push(
-                            CardWithDetails::from_card_arc(card, phase.clone(), false, &game).await,
-                        );
+                        spells.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
                     }
 
                     for card in player_cards_in_hand {
-                        hand.push(
-                            CardWithDetails::from_card_arc(card, phase.clone(), false, &game).await,
-                        );
+                        hand.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
                     }
 
                     {

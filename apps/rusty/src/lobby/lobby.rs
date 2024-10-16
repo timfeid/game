@@ -240,6 +240,18 @@ impl Lobby {
         Ok(())
     }
 
+    pub async fn respond_card_selection(
+        &mut self,
+        player: Arc<Mutex<Player>>,
+        target: Option<EffectTarget>,
+    ) -> AppResult<()> {
+        Game::respond_card_selection(self.game.clone(), &player, target)
+            .await
+            .map_err(|x| AppError::BadRequest(x))?;
+
+        Ok(())
+    }
+
     pub async fn respond_mandatory_player_ability(
         &mut self,
         ability_id: String,
@@ -293,10 +305,7 @@ impl Lobby {
         index: usize,
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
-        self.game
-            .lock()
-            .await
-            .play_card(&player, index, target)
+        Game::play_card(&self.game, &player, index, target)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 

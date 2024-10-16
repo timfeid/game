@@ -5,6 +5,7 @@
 	import { accessToken } from '$lib/stores/access-token';
 	import type {
 		AbilityDetails,
+		CardSelectionDetails,
 		ExecuteAbility,
 		LobbyCommand,
 		LobbyData,
@@ -15,7 +16,7 @@
 	import { toast } from 'svelte-sonner';
 	import InGame from './InGame.svelte';
 	import Lobby from './Lobby.svelte';
-	import { askOptionalAbility, mandatoryAbility } from '../../stores/dialog';
+	import { askOptionalAbility, mandatoryAbility, selectFromCards } from '../../stores/dialog';
 
 	let lobby: LobbyData | undefined;
 	let unsubscribe: (() => void) | undefined;
@@ -33,6 +34,12 @@
 
 	function isAskExecuteAbility(data: LobbyCommand): data is { AskExecuteAbility: ExecuteAbility } {
 		return 'AskExecuteAbility' in data;
+	}
+
+	function isCardSelection(
+		data: LobbyCommand
+	): data is { ChooseFromSelection: CardSelectionDetails } {
+		return 'ChooseFromSelection' in data;
 	}
 
 	function isTurnMessages(data: LobbyCommand): data is { TurnMessages: LobbyTurnMessage } {
@@ -61,6 +68,10 @@
 		lobby = data;
 	}
 
+	function cardSelection(details: CardSelectionDetails) {
+		selectFromCards.set(details);
+	}
+
 	async function reset(accessToken: string) {
 		if (unsubscribe) {
 			unsubscribe();
@@ -82,6 +93,11 @@
 
 					if (isTurnMessages(data)) {
 						return turnMessageReceived(data.TurnMessages);
+					}
+
+					if (isCardSelection(data)) {
+						return cardSelection(data.ChooseFromSelection);
+						console.log(data);
 					}
 				},
 				onStarted() {

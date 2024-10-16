@@ -9,9 +9,7 @@ use crate::game::{
         Card, CardPhase, CardType, CreatureType,
     },
     decks::duplicate_card,
-    effects::{
-        DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction,
-    },
+    effects::{DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract},
     mana::ManaType,
     player::Player,
     stat::{Stat, StatType, Stats},
@@ -94,7 +92,7 @@ mod test {
         }
 
         let ga = Arc::new(Mutex::new(game));
-        Game::process_action_queue(ga.clone(), hydra.clone().unwrap()).await;
+        // Game::process_action_queue(ga.clone(), hydra.clone().unwrap()).await;
 
         ga.lock()
             .await

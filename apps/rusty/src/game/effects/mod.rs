@@ -478,28 +478,3 @@ impl Effect for DynamicStatModifierEffect {
 //         matches!(self.expires, ExpireContract::Turns(0))
 //     }
 // }
-
-#[derive(Debug)]
-pub struct LifeLinkAction {}
-
-#[async_trait::async_trait]
-impl CardAction for LifeLinkAction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    async fn apply(&self, game: &mut Game, card_arc: Arc<Mutex<Card>>, target: EffectTarget) {
-        let (owner, amount) = {
-            let lock = card_arc.lock().await;
-            let owner = lock.owner.clone();
-            let amount = lock.damage_dealt_to_players.clone();
-            (owner, amount)
-        };
-        if let Some(owner) = owner {
-            owner
-                .lock()
-                .await
-                .stat_manager
-                .add_stat(Ulid::new().to_string(), Stat::new(StatType::Health, amount));
-        }
-    }
-}

@@ -1,26 +1,31 @@
-use crate::game::{
-    action::{
-        generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
-        ApplyEffectToPlayerCardType, ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
-        AsyncClosureWithCardAction, CardAction, CardActionTarget, CardActionTrigger,
-        CardActionWrapper, CardRequiredTarget, CardTargetTeam, CastMandatoryAdditionalAbility,
-        CastOptionalAdditionalAbility, DeclareAttackerAction, DeclareBlockerAction, DrawCardAction,
-        DrawCardCardAction, PlayerActionTarget, TriggerTarget,
+use crate::{
+    game::{
+        action::{
+            generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
+            ApplyEffectToPlayerCardType, ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
+            AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, CardAction,
+            CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
+            CardTargetTeam, CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
+            ChooseFromSelectionAction, DeclareAttackerAction, DeclareBlockerAction, DrawCardAction,
+            DrawCardCardAction, PlayCardAction, PlayerActionTarget, ReturnToHandAction,
+            TriggerTarget,
+        },
+        card::{
+            card::{create_creature_card, create_multiple_cards},
+            Card, CardPhase, CardType, Counter, CreatureType,
+        },
+        decks::duplicate_card,
+        effects::{
+            DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract,
+            StatModifierEffect,
+        },
+        mana::ManaType,
+        player::Player,
+        stat::{Stat, StatType, StaticStatId, Stats},
+        turn::TurnPhase,
+        ActionType, CardWithDetails, Game,
     },
-    card::{
-        card::{create_creature_card, create_multiple_cards},
-        Card, CardPhase, CardType, Counter, CreatureType,
-    },
-    decks::duplicate_card,
-    effects::{
-        DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction,
-        StatModifierEffect,
-    },
-    mana::ManaType,
-    player::Player,
-    stat::{Stat, StatType, Stats},
-    turn::TurnPhase,
-    ActionType, Game,
+    lobby::manager::{CardSelectionDetails, LobbyCommand},
 };
 use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 
@@ -40,7 +45,24 @@ fn create_forest() -> Card {
             ),
             CardRequiredTarget::None,
             Arc::new(GenerateManaAction {
-                mana_to_add: vec![ManaType::Green],
+                mana_to_add: vec![
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                ],
                 target: PlayerActionTarget::Owner,
             }),
         )],
@@ -98,7 +120,8 @@ pub fn create_druid() -> Card {
             ))),
             Arc::new(
                 |game: Arc<Mutex<Game>>,
-                 card: Arc<Mutex<Card>>|
+                 card: Arc<Mutex<Card>>,
+                 ability_id: String|
                  -> Pin<Box<dyn Future<Output = bool> + Send>> {
                     Box::pin(async move {
                         if let Ok(card) = card.try_lock() {
@@ -109,6 +132,169 @@ pub fn create_druid() -> Card {
                     })
                 }
             )
+        )
+    )
+}
+
+pub fn create_elvish_warmaster() -> Card {
+    create_creature_card!(
+        "Elvish Warmaster",
+        CreatureType::Elf,
+        "Whenever one or more other Elves you control enter, create a 1/1 green Elf Warrior creature token. This ability triggers only once each turn.",
+        2,
+        2,
+        [ManaType::Colorless, ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Elves you control get +2/+2 and gain deathtouch until end of turn.".to_string(),
+                vec![
+                    ManaType::Colorless,
+                    ManaType::Colorless,
+                    ManaType::Colorless,
+                    ManaType::Colorless,
+                    ManaType::Colorless,
+                    ManaType::Green,
+                    ManaType::Green,
+                ],
+                None,
+                false,
+            ),
+            CardRequiredTarget::None,
+            Arc::new(ApplyEffectsToPlayerCreatureType::new(
+                CreatureType::Elf,
+                Arc::new(
+                    move |target,
+                          source_card,
+                          effect_id|
+                          -> Pin<
+                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+                            if let EffectTarget::Card(card) = &target {
+                                if !Arc::ptr_eq(card, &source_card) {
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Deathtouch,
+                                        amount: 1,
+                                        expires: ExpireContract::Turns(1),
+                                        id: EffectID(format!(
+                                            "{}-{}-deathtouch",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Power,
+                                        amount: 2,
+                                        expires: ExpireContract::Turns(1),
+                                        id: EffectID(format!(
+                                            "{}-{}-power",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Toughness,
+                                        amount: 2,
+                                        expires: ExpireContract::Turns(1),
+                                        id: EffectID(format!(
+                                            "{}-{}-toughness",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                }
+                            }
+                            effects
+                        })
+                    },
+                ),
+            )),
+        ),
+
+        CardActionTrigger::new(
+            ActionTriggerType::CreatureTypeCardPlayed(TriggerTarget::Owner, CreatureType::Elf),
+            CardRequiredTarget::None,
+            Arc::new(AsyncClosureActionWithTargetAndAbility::new(Arc::new(
+                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, _target, ability_id| -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                    Box::pin(async move {
+                        let (owner, played) = {
+                            let card = card.lock().await;
+                            let owner_arc = card.owner.clone().unwrap();
+                            let played = game.lock().await.triggers_played_this_turn.get(ability_id.as_str()).unwrap_or(&0).clone();
+
+                            (owner_arc, played)
+                        };
+
+                        if played == 1 {
+                            Game::play_token(&game, &owner, create_creature_card!("Token", CreatureType::Elf, "", 1,1, [], [])).await.ok();
+                        }
+                    })
+                }
+            )))
+        )
+    )
+}
+
+pub fn create_llanowar_elves() -> Card {
+    create_creature_card!(
+        "Llanowar Elves",
+        CreatureType::Elf,
+        "",
+        1,
+        1,
+        [ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Add {G} to your mana pool.".to_string(),
+                vec![],
+                None,
+                true
+            ),
+            CardRequiredTarget::None,
+            Arc::new(GenerateManaAction {
+                mana_to_add: vec![ManaType::Green],
+                target: PlayerActionTarget::Owner
+            })
+        )
+    )
+}
+
+pub fn create_elvish_mystic() -> Card {
+    create_creature_card!(
+        "Elvish Mystic",
+        CreatureType::Elf,
+        "",
+        1,
+        1,
+        [ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Add {G} to your mana pool.".to_string(),
+                vec![],
+                None,
+                true
+            ),
+            CardRequiredTarget::None,
+            Arc::new(GenerateManaAction {
+                mana_to_add: vec![ManaType::Green],
+                target: PlayerActionTarget::Owner
+            })
         )
     )
 }
@@ -237,6 +423,276 @@ pub fn create_priest_of_titania() -> Card {
     )
 }
 
+fn regenerate_target_card() -> Arc<AsyncClosureWithCardAction> {
+    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+        |game: Arc<Mutex<Game>>,
+         source: Arc<Mutex<Card>>,
+         target_card: Arc<Mutex<Card>>|
+         -> Pin<Box<dyn Future<Output = ()> + Send>> {
+            Box::pin(async move {
+                let mut card = target_card.lock().await;
+                card.add_stat(
+                    StaticStatId::Regenerate.to_string(),
+                    Stat::new(StatType::Regenerate, 1),
+                );
+            })
+        },
+    )))
+}
+
+pub fn create_ezuri() -> Card {
+    create_creature_card!(
+        "Ezuri, Renegade Leader",
+        CreatureType::Elf,
+        "",
+        2,
+        2,
+        [ManaType::Colorless, ManaType::Green, ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Regenerate another target Elf.".to_string(),
+                vec![ManaType::Green],
+                None,
+                false
+            ),
+            CardRequiredTarget::CreatureOfType(CreatureType::Elf, CardTargetTeam::Any, None),
+            regenerate_target_card(),
+        ),
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Elf creatures you control get +3/+3 and gain trample until end of turn."
+                    .to_string(),
+                vec![
+                    ManaType::Colorless,
+                    ManaType::Colorless,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green
+                ],
+                None,
+                false
+            ),
+            CardRequiredTarget::None,
+            Arc::new(ApplyEffectsToPlayerCreatureType::new(
+                CreatureType::Elf,
+                Arc::new(
+                    move |target,
+                          source_card,
+                          effect_id|
+                          -> Pin<
+                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                target: target.clone(),
+                                stat_type: StatType::Power,
+                                amount: 3,
+                                expires: ExpireContract::Turns(1),
+                                id: EffectID(format!(
+                                    "{}-{}-power",
+                                    source_card.clone().lock().await.id,
+                                    effect_id
+                                )),
+                                applied: false,
+                                source_card: Some(source_card.clone()),
+                                previous_turn: None,
+                            })));
+                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                target: target.clone(),
+                                stat_type: StatType::Toughness,
+                                amount: 3,
+                                expires: ExpireContract::Turns(1),
+                                id: EffectID(format!(
+                                    "{}-{}-toughness",
+                                    source_card.clone().lock().await.id,
+                                    effect_id
+                                )),
+                                applied: false,
+                                source_card: Some(source_card.clone()),
+                                previous_turn: None,
+                            })));
+                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                target: target.clone(),
+                                stat_type: StatType::Trample,
+                                amount: 1,
+                                expires: ExpireContract::Turns(1),
+                                id: EffectID(format!(
+                                    "{}-{}-trample",
+                                    source_card.clone().lock().await.id,
+                                    effect_id
+                                )),
+                                applied: false,
+                                source_card: Some(source_card.clone()),
+                                previous_turn: None,
+                            })));
+                            effects
+                        })
+                    },
+                ),
+            )),
+        )
+    )
+}
+
+pub fn create_heritage_druid() -> Card {
+    create_creature_card!(
+        "Heritage Druid",
+        CreatureType::Elf,
+        "",
+        1,
+        1,
+        [ManaType::Green],
+        [],
+        CardActionTrigger::new_with_requirements(
+            ActionTriggerType::AbilityWithinPhases(
+                "Tap three untapped Elves you control: Add {G}{G}{G}.".to_string(),
+                vec![],
+                None,
+                false
+            ),
+            CardRequiredTarget::None,
+            Arc::new(CastMandatoryAdditionalAbility {
+                action_type: ActionType::None,
+                mana: vec![],
+                target: CardRequiredTarget::CreatureOfType(
+                    CreatureType::Elf,
+                    CardTargetTeam::Owner,
+                    Some(true)
+                ),
+                description: "Tap an untapped Elf you control".to_string(),
+                ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
+                    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                        |game: Arc<Mutex<Game>>,
+                         source_card: Arc<Mutex<Card>>,
+                         target: Arc<Mutex<Card>>|
+                         -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                            Box::pin(async move {
+                                {
+                                    target.lock().await.tapped = true;
+                                }
+
+                                game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                        ability_id: None,
+                                        card: source_card,
+                                        action: Arc::new(CastMandatoryAdditionalAbility {
+                                            action_type: ActionType::None,
+                                            mana: vec![],
+                                            target: CardRequiredTarget::CreatureOfType(
+                                                CreatureType::Elf,
+                                                CardTargetTeam::Owner,
+                                                Some(true)
+                                            ),
+                                            description: "Tap an untapped Elf you control".to_string(),
+                                            ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
+                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                    |game: Arc<Mutex<Game>>,
+                                                    source_card: Arc<Mutex<Card>>,
+                                                    target: Arc<Mutex<Card>>|
+                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                        Box::pin(async move {
+                                                            { target.lock().await.tapped = true; }
+
+                                                            game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                                                    ability_id: None,
+                                                                    card: source_card,
+                                                                    action: Arc::new(CastMandatoryAdditionalAbility {
+                                                                        action_type: ActionType::None,
+                                                                        mana: vec![],
+                                                                        target: CardRequiredTarget::CreatureOfType(
+                                                                            CreatureType::Elf,
+                                                                            CardTargetTeam::Owner,
+                                                                            Some(true)
+                                                                        ),
+                                                                        description: "Tap an untapped Elf you control".to_string(),
+                                                                        ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
+                                                                            Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                                                |game: Arc<Mutex<Game>>,
+                                                                                source_card: Arc<Mutex<Card>>,
+                                                                                target: Arc<Mutex<Card>>|
+                                                                                -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                                                    Box::pin(async move {
+                                                                                        { target.lock().await.tapped = true; }
+
+                                                                                        game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                                                                                ability_id: None,
+                                                                                                card: source_card,
+                                                                                                action: Arc::new(GenerateManaAction {mana_to_add: vec![ManaType::Green, ManaType::Green, ManaType::Green], target: PlayerActionTarget::Owner}) ,
+                                                                                                target: None
+                                                                                            })]).await;
+                                                                                    })
+                                                                                },
+                                                                            )))
+                                                                        })
+                                                                    }) ,
+                                                                    target: None
+                                                                })]).await;
+                                                        })
+                                                    },
+                                                )))
+                                            })
+                                        }) ,
+                                        target: None
+                                    })]).await;
+                            })
+                        },
+                    )))
+                })
+            }),
+            Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 card: Arc<Mutex<Card>>,
+                 ability_id|
+                 -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                    Box::pin(async move {
+                        let owner = {
+                            if let Ok(card_l) = card.try_lock() {
+                                card_l.owner.clone()
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(owner) = owner {
+                            let untapped_count = {
+                                owner
+                                            .lock()
+                                            .await
+                                            .filter_cards_in_play(Arc::new(
+                                                move |card_arc: Arc<Mutex<Card>>| -> Pin<
+                                                    Box<dyn Future<Output = bool> + Send>,
+                                                > {
+                                                    Box::pin(async move {
+                                                        if let Ok(card) = card_arc.try_lock() {
+                                                            println!("checking card");
+                                                            card.current_phase == CardPhase::Ready
+                                                                && !card.tapped
+                                                                && card.creature_type
+                                                                    == Some(CreatureType::Elf)
+                                                        } else {
+                                                            println!(
+                                                                "unable to lock card!!!!!!!!!!!!!"
+                                                            );
+                                                            false
+                                                        }
+                                                    })
+                                                },
+                                            ))
+                                            .await
+                            };
+                            return untapped_count.len() > 2;
+                        }
+                        println!("not ready yet {:?}", card);
+
+                        false
+                    })
+                }
+            )
+        )
+    )
+}
+
 pub fn create_wirewood() -> Card {
     create_creature_card!(
         "Wirewood",
@@ -252,7 +708,7 @@ pub fn create_wirewood() -> Card {
             Arc::new(CastMandatoryAdditionalAbility {
                 action_type: ActionType::None,
                 mana: vec![],
-                target: CardRequiredTarget::CreatureOfType(CreatureType::Elf, CardTargetTeam::Owner),
+                target: CardRequiredTarget::CreatureOfType(CreatureType::Elf, CardTargetTeam::Owner, None),
                 description: "Return an Elf you control to its owner's hand: Untap target creature. Activate only once each turn.".to_string(),
                 ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
 
@@ -268,7 +724,6 @@ pub fn create_wirewood() -> Card {
                             {
 
                             let mut owner = owner_arc.lock().await;
-                            // Remove the card from the battlefield and add it to the owner's hand
                             if let Some(index) = owner.cards_in_play.iter().position(|c| Arc::ptr_eq(c, &card)) {
                                 let card_arc = owner.cards_in_play.remove(index);
                                 owner.cards_in_hand.push(card_arc.clone());
@@ -278,6 +733,7 @@ pub fn create_wirewood() -> Card {
 
                                     game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
                                         card: card,
+                                        ability_id: None,
                                         action: Arc::new(CastMandatoryAdditionalAbility {
                                             action_type: ActionType::None,
                                             mana: vec![],
@@ -308,7 +764,7 @@ pub fn create_wirewood() -> Card {
                 },
             )))})}),
             Arc::new(
-                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, ability_id| -> Pin<Box<dyn Future<Output = bool> + Send>> {
                     Box::pin(async move {
                         if let Ok(card) = card.try_lock() {
                             if let Some(owner) = card.owner.as_ref() {
@@ -356,31 +812,262 @@ pub fn create_leaf_crowned_visionary() -> Card {
         CardActionTrigger::new(
             ActionTriggerType::Continuous,
             CardRequiredTarget::None,
-            Arc::new(ApplyEffectToPlayerCardType {
-                card_type: CardType::Creature,
-                effect_generator: Arc::new(
-                    |target, card| -> Vec<Arc<Mutex<dyn Effect + Send + Sync>>> {
-                        vec![
-                            Arc::new(Mutex::new(StatModifierEffect::new(
-                                target.clone(),
-                                StatType::Toughness,
-                                1,
-                                ExpireContract::Never,
-                                card.clone(),
-                            ))),
-                            Arc::new(Mutex::new(StatModifierEffect::new(
-                                target,
-                                StatType::Power,
-                                1,
-                                ExpireContract::Never,
-                                card,
-                            ))),
-                        ]
-                    }
-                )
-            })
+            Arc::new(ApplyEffectsToPlayerCreatureType::new(
+                CreatureType::Elf,
+                Arc::new(
+                    move |target,
+                          source_card,
+                          effect_id|
+                          -> Pin<
+                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+                            if let EffectTarget::Card(card) = &target {
+                                if !Arc::ptr_eq(card, &source_card) {
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Power,
+                                        amount: 1,
+                                        expires: ExpireContract::Never,
+                                        id: EffectID(format!(
+                                            "{}-{}-power",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Toughness,
+                                        amount: 1,
+                                        expires: ExpireContract::Never,
+                                        id: EffectID(format!(
+                                            "{}-{}-toughness",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                }
+                            }
+                            effects
+                        })
+                    },
+                ),
+            )),
         )
     )
+}
+
+// TODO: Convoke (Your creatures can help cast this spell. Each creature you tap while casting this spell pays for {1} or one mana of that creature's color.)
+
+pub fn create_chord_of_calling() -> Card {
+    Card::new(
+        "Chord of Calling",
+        "Search your library for a creature card with mana value :pool_green_total: or less, put it onto the battlefield, then shuffle.",
+        vec![CardActionTrigger::new(
+            ActionTriggerType::CardPlayedFromHand,
+            CardRequiredTarget::None,
+            Arc::new(AsyncClosureAction::new(Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 source: Arc<Mutex<Card>>|
+                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                    Box::pin(async move {
+                        let owner = source.lock().await.owner.clone().unwrap();
+                        let mut cards = vec![];
+                        let mut valid_card_indexes = vec![];
+
+                        let player_id = owner.lock().await.name.clone();
+                        let deck = owner.lock().await.deck.draw_pile.clone();
+                        let mana_pool = owner.lock().await.mana_pool.green;
+                        for (index, card) in deck.iter().enumerate() {
+                            cards.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
+                            let cost = card.lock().await.cost.len();
+                            let is_creature = card.lock().await.card_type == CardType::Creature;
+                            if cost < mana_pool as usize && is_creature {
+                                valid_card_indexes.push(index as i32)
+                            }
+                        }
+
+                        // game.lock().await.send_command(LobbyCommand::ChooseFromSelection(CardSelectionDetails { player_id, cards, valid_card_indexes }));
+
+                                game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                        ability_id: None,
+                                        card: source,
+                                        action: Arc::new(ChooseFromSelectionAction::new(player_id, cards, valid_card_indexes, Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
+                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                |game: Arc<Mutex<Game>>,
+                                                source_card: Arc<Mutex<Card>>,
+                                                target: Arc<Mutex<Card>>|
+                                                -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                    Box::pin(async move {
+                                                        println!("source????? {:?}", source_card);
+                                                        let position = game.lock().await.frontend_target_from_card(&target).await;
+                                                        Game::play_card_without_mana(&game, position).await.expect("oh wow we are here?");
+                                                        // let source_card_cloned = source_card.clone();
+                                                        // {
+                                                        //     game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {action:Arc::new(ReturnToHandAction{}), card: source_card_cloned, target: Some(EffectTarget::Card(target)), ability_id: None })]).await;
+                                                        // }
+
+                                                        // game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                                        //         ability_id: None,
+                                                        //         card: source_card,
+                                                        //         action: Arc::new(CastMandatoryAdditionalAbility {
+                                                        //             action_type: ActionType::None,
+                                                        //             mana: vec![],
+                                                        //             target: CardRequiredTarget::CreatureOfType(
+                                                        //                 CreatureType::Elf,
+                                                        //                 CardTargetTeam::Owner,
+                                                        //                 Some(true)
+                                                        //             ),
+                                                        //             description: "Untap target creature".to_string(),
+                                                        //             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
+                                                        //                 Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                        //                     |game: Arc<Mutex<Game>>,
+                                                        //                     source_card: Arc<Mutex<Card>>,
+                                                        //                     target: Arc<Mutex<Card>>|
+                                                        //                     -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                        //                         Box::pin(async move {
+                                                        //                             { target.lock().await.tapped = false; }
+
+                                                        //                         })
+                                                        //                     },
+                                                        //                 )))
+                                                        //             })
+                                                        //         }) ,
+                                                        //         target: None
+                                                        //     })]).await;
+                                                })
+                                            })))
+                                            }))),
+
+                                        target: None
+                                    })]).await;
+
+                    // get cards in deck
+                    // send
+                    })
+                },
+            ))),
+        )],
+        CardPhase::Ready,
+        CardType::Instant,
+        vec![],
+        vec![ManaType::Green, ManaType::Green, ManaType::Green],
+    )
+}
+
+pub fn create_quirion_ranger() -> Card {
+    create_creature_card!(
+            "Quirion Ranger",
+            CreatureType::Elf,
+            "",
+            2,
+            2,
+            // [ManaType::Colorless, ManaType::Green],
+            [],
+            [],
+            CardActionTrigger::new_with_requirements(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Return a Forest you control to its owner's hand: Untap target creature. Activate only once each turn.".to_string(),
+                    vec![],
+                    None,
+                    false,
+                ),
+                CardRequiredTarget::CardOfType(CardType::BasicLand(ManaType::Green), CardTargetTeam::Owner),
+                    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                        |game: Arc<Mutex<Game>>,
+                        source_card: Arc<Mutex<Card>>,
+                        target: Arc<Mutex<Card>>|
+                        -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                            Box::pin(async move {
+                                let source_card_cloned = source_card.clone();
+                                {
+                                    game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {action:Arc::new(ReturnToHandAction{}), card: source_card_cloned, target: Some(EffectTarget::Card(target)), ability_id: None })]).await;
+                                }
+
+                                game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
+                                        ability_id: None,
+                                        card: source_card,
+                                        action: Arc::new(CastMandatoryAdditionalAbility {
+                                            action_type: ActionType::None,
+                                            mana: vec![],
+                                            target: CardRequiredTarget::CreatureOfType(
+                                                CreatureType::Elf,
+                                                CardTargetTeam::Owner,
+                                                Some(true)
+                                            ),
+                                            description: "Untap target creature".to_string(),
+                                            ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
+                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                    |game: Arc<Mutex<Game>>,
+                                                    source_card: Arc<Mutex<Card>>,
+                                                    target: Arc<Mutex<Card>>|
+                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                        Box::pin(async move {
+                                                            { target.lock().await.tapped = false; }
+
+                                                        })
+                                                    },
+                                                )))
+                                            })
+                                        }) ,
+                                        target: None
+                                    })]).await;
+                        })
+                    }))),
+
+                Arc::new(
+                    |game: Arc<Mutex<Game>>,
+                     card: Arc<Mutex<Card>>,
+                     ability_id|
+                     -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                        Box::pin(async move {
+                            if let Ok(card) = card.try_lock() {
+                                let has_tapped_creature = game.lock().await.filter_cards_in_play(Arc::new(
+                                        move |card_arc: Arc<Mutex<Card>>| -> Pin<
+                                            Box<dyn Future<Output = bool> + Send>,
+                                        > {
+                                            Box::pin(async move {
+                                                if let Ok(card) = card_arc.try_lock() {
+                                                    card.card_type == CardType::Creature && card.tapped
+                                                } else {
+                                                    false
+                                                }
+                                            })
+                                        },
+                                    )).await.len() > 0;
+                                let has_forest = card.owner.as_ref().unwrap().lock().await
+                                    .filter_cards_in_play(Arc::new(
+                                        move |card_arc: Arc<Mutex<Card>>| -> Pin<
+                                            Box<dyn Future<Output = bool> + Send>,
+                                        > {
+                                            Box::pin(async move {
+                                                if let Ok(card) = card_arc.try_lock() {
+                                                    card.card_type == CardType::BasicLand(ManaType::Green)
+                                                } else {
+                                                    false
+                                                }
+                                            })
+                                        },
+                                    )).await.len() > 0;
+
+                                let total_triggers = game.lock().await.triggers_played_this_turn.get(ability_id.as_str()).unwrap_or(&0).clone();
+
+                                return has_forest && has_tapped_creature && total_triggers ==0;
+                            }
+
+                            false
+                        })
+                    }
+                )
+            )
+        )
 }
 
 pub fn create_green_deck() -> Vec<Card> {
@@ -390,8 +1077,15 @@ pub fn create_green_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 4));
     // deck.append(&mut duplicate_card(create_wirewood(), 4));
     // deck.append(&mut duplicate_card(create_wirewood(), 4));
-    // deck.append(&mut duplicate_card(create_druid(), 4));
-    deck.append(&mut duplicate_card(create_elvish(), 4));
+    deck.append(&mut duplicate_card(create_druid(), 4));
+    // deck.append(&mut duplicate_card(create_elvish(), 4));
+    // deck.append(&mut duplicate_card(create_ezuri(), 4));
+    // deck.append(&mut duplicate_card(create_elvish_mystic(), 4));
+    // deck.append(&mut duplicate_card(create_heritage_druid(), 4));
+    // deck.append(&mut duplicate_card(create_elvish_warmaster(), 4));
+    // deck.append(&mut duplicate_card(create_quirion_ranger(), 4));
+    deck.append(&mut duplicate_card(create_chord_of_calling(), 4));
+
     deck
 }
 
@@ -452,7 +1146,7 @@ mod test {
         }
 
         let ga = Arc::new(Mutex::new(game));
-        Game::process_action_queue(ga.clone(), leaf.clone().unwrap()).await;
+        // Game::process_action_queue(ga.clone(), leaf.clone().unwrap()).await;
         ga.lock().await.print().await;
 
         ga.lock()
@@ -467,12 +1161,8 @@ mod test {
             .await
             .expect("oh no?");
 
-        ga.lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh no");
-        Game::process_action_queue(ga.clone(), leaf.clone().unwrap()).await;
+        Game::play_card(&ga, &player, 0, None).await.expect("oh no");
+        // Game::process_action_queue(ga.clone(), leaf.clone().unwrap()).await;
 
         let ability_id = ga
             .lock()
@@ -598,9 +1288,7 @@ mod test {
 
         let turn = ga.clone().lock().await.current_turn.clone().unwrap();
 
-        let details =
-            CardWithDetails::from_card_arc(&a.unwrap(), ga.lock().await.current_phase(), true, &ga)
-                .await;
+        let details = CardWithDetails::from_card_arc(a.unwrap(), &ga).await;
         println!("{:?}", details.abilities);
 
         ga.lock()

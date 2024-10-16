@@ -184,13 +184,14 @@ impl Card {
             .triggers
             .iter()
             .filter(|t| match &t.trigger_type {
-                ActionTriggerType::CardPlayedFromHand => true,
                 ActionTriggerType::AbilityWithinPhases(_, _, _, _) => true,
                 ActionTriggerType::PhaseStarted(vec, trigger_target) => true,
                 ActionTriggerType::CreatureTypeCardPlayed(trigger_target, creature_type) => true,
                 ActionTriggerType::Attached => true,
                 ActionTriggerType::DamageApplied => true,
                 ActionTriggerType::OtherCardPlayed(_) => true,
+
+                ActionTriggerType::CardPlayedFromHand => false,
                 ActionTriggerType::Continuous => false,
                 ActionTriggerType::Detached => false,
                 ActionTriggerType::CardDestroyed => false,
@@ -271,6 +272,7 @@ impl Card {
                         card: Arc::clone(&card_arc),
                         action: action_trigger.action.clone(),
                         target: target.clone(),
+                        ability_id: Some(action_trigger.id.clone()),
                     }));
                 }
                 _ => {}
@@ -306,6 +308,7 @@ impl Card {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
                             target: target.clone(),
+                            ability_id: Some(action_trigger.id.clone()),
                         }));
                     }
                 }
@@ -322,32 +325,33 @@ impl Card {
         target: Option<EffectTarget>,
         trigger_id: String,
         game: Arc<Mutex<Game>>,
-    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool) {
+    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool, Vec<ManaType>) {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let mut requires_tap = false;
+        let mut mana_requirements: Vec<ManaType> = vec![];
 
         let triggers = { card_arc.lock().await.triggers.clone() };
         for action_trigger in &triggers {
             match &action_trigger.trigger_type {
                 ActionTriggerType::AbilityWithinPhases(
                     _,
-                    mana_requirements,
+                    mana_requirement,
                     allowed_phases,
                     tap_required,
                 ) => {
                     if trigger_id != action_trigger.id {
                         continue;
                     }
-                    println!("we were triggered");
+                    mana_requirements = mana_requirement.clone();
                     let in_phases = allowed_phases.is_none()
                         || allowed_phases.as_ref().unwrap().contains(&turn_phase);
 
-                    println!("getting requirements game: {:?} card: {:?}", game, card_arc);
-                    let meets_requirements =
-                        (action_trigger.requirements)(Arc::clone(&game), Arc::clone(&card_arc))
-                            .await;
-
-                    println!("here is where it matters: {}", meets_requirements);
+                    let meets_requirements = (action_trigger.requirements)(
+                        Arc::clone(&game),
+                        Arc::clone(&card_arc),
+                        trigger_id.clone(),
+                    )
+                    .await;
 
                     if in_phases && meets_requirements {
                         requires_tap = tap_required.clone();
@@ -355,6 +359,7 @@ impl Card {
                             card: Arc::clone(&card_arc),
                             action: action_trigger.action.clone(),
                             target: target.clone(),
+                            ability_id: Some(action_trigger.id.clone()),
                         }));
                     }
                 }
@@ -362,7 +367,7 @@ impl Card {
             }
         }
 
-        (actions, requires_tap)
+        (actions, requires_tap, mana_requirements)
     }
 
     pub async fn collect_phase_based_actions(
@@ -403,6 +408,7 @@ impl Card {
                             }
                             action::TriggerTarget::Any => None,
                         },
+                        ability_id: Some(action_trigger.id.clone()),
                     }));
                 }
             } else if &trigger_type == &action_trigger.trigger_type {
@@ -410,16 +416,18 @@ impl Card {
                     card: Arc::clone(card_arc),
                     action: action_trigger.action.clone(),
                     target: None,
+                    ability_id: Some(action_trigger.id.clone()),
                 }));
             } else if action_trigger.trigger_type == ActionTriggerType::CardPlayedFromHand
                 && trigger_type != ActionTriggerType::CardDestroyed
             {
                 // println!("EXECUTING THIS {}", name);
-                phase_based_actions.push(Arc::new(CardActionWrapper {
-                    card: Arc::clone(card_arc),
-                    action: action_trigger.action.clone(),
-                    target: None,
-                }));
+                // phase_based_actions.push(Arc::new(CardActionWrapper {
+                //     card: Arc::clone(card_arc),
+                //     action: action_trigger.action.clone(),
+                //     target: None,
+                //     ability_id: Some(action_trigger.id.clone()),
+                // }));
             }
         }
 

@@ -3,6 +3,7 @@
 	import type {
 		AbilityDetails,
 		CardWithDetails,
+		ExecuteAbility,
 		FrontendTarget,
 		GameState,
 		PlayerState
@@ -16,6 +17,7 @@
 	import CCard from './Card.svelte';
 	import { searchingForTarget, target, waitForTarget } from './game';
 	import ManaBubble from './mana-bubble.svelte';
+	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
 
 	export let game: GameState;
 	export let code: string;
@@ -49,8 +51,34 @@
 		}
 	}
 
+	async function selectAbilityDialog(abilities: AbilityDetails[]): Promise<AbilityDetails> {
+		return await new Promise((resolve, reject) => {
+			let t: NodeJS.Timeout;
+			toast.info('Please select an ability');
+			selectedAbility.set(null);
+			selectFromAbilities.set(abilities);
+			selectedAbility.subscribe((ability) => {
+				if (ability) {
+					clearTimeout(t);
+					resolve(ability);
+				}
+			});
+			t = setTimeout(() => reject('ran out of time'), 10000);
+		});
+	}
+
 	async function selectAbility(card: CardWithDetails) {
-		return card.abilities.find((c) => c.meets_requirements);
+		let met = card.abilities.filter(
+			(c) => c.meets_mana_requirements && c.meets_requirements_except_mana
+		);
+		if (met.length === 0) {
+			return;
+		}
+		if (met.length === 1) {
+			return met[0];
+		}
+
+		return selectAbilityDialog(met);
 	}
 
 	async function actionSpell(index: number) {
@@ -145,39 +173,18 @@
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type !== 'string'}
-					<CCard
-						pile="Play"
-						{game}
-						cardIndex={i}
-						playerIndex={player.player_index}
-						on:click={() => actionCard(i)}
-						cardWithDetails={card}
-					></CCard>
+					<CCard {game} on:click={() => actionCard(i)} cardWithDetails={card}></CCard>
 				{/if}
 			{/each}
 		</div>
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type === 'string'}
-					<CCard
-						pile="Play"
-						{game}
-						cardIndex={i}
-						playerIndex={player.player_index}
-						on:click={() => actionCard(i)}
-						cardWithDetails={card}
-					></CCard>
+					<CCard {game} on:click={() => actionCard(i)} cardWithDetails={card}></CCard>
 				{/if}
 			{/each}
 			{#each player.public_info.spells as card, i}
-				<CCard
-					pile="Spell"
-					{game}
-					cardIndex={i}
-					playerIndex={player.player_index}
-					class="opacity-50"
-					on:click={() => actionSpell(i)}
-					cardWithDetails={card}
+				<CCard {game} class="opacity-50" on:click={() => actionSpell(i)} cardWithDetails={card}
 				></CCard>
 			{/each}
 		</div>

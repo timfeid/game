@@ -19,6 +19,12 @@ use crate::{
 };
 
 #[derive(Type, Serialize, Deserialize)]
+pub struct RespondCardSelection {
+    pub code: String,
+    pub target: Option<FrontendTarget>,
+}
+
+#[derive(Type, Serialize, Deserialize)]
 pub struct RespondMandatoryAbility {
     pub code: String,
     pub target: Option<FrontendTarget>,
@@ -244,6 +250,16 @@ impl LobbyController {
         };
         let async_stream = async_stream;
         async_stream
+    }
+
+    pub(crate) async fn respond_card_selection(
+        ctx: Ctx,
+        args: RespondCardSelection,
+    ) -> AppResult<()> {
+        let user = ctx.required_user()?;
+        ctx.lobby_manager.respond_card_selection(args, user).await?;
+
+        Ok(())
     }
 
     pub(crate) async fn respond_mandatory_ability(

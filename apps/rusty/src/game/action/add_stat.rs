@@ -22,7 +22,13 @@ impl CardAction for CardAddStatAction {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    async fn apply(&self, game: &mut Game, card: Arc<Mutex<Card>>, target: EffectTarget) {
+    async fn apply(
+        &self,
+        game: &mut Game,
+        card: Arc<Mutex<Card>>,
+        target: EffectTarget,
+        ability_id: Option<String>,
+    ) {
         println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;
         card.add_stat(self.id.clone(), self.stat.clone());

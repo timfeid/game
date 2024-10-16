@@ -31,6 +31,21 @@ pub enum StatType {
     Trample,
     Lifelink,
     Flying,
+    Regenerate,
+    Deathtouch,
+}
+
+#[derive(Debug)]
+pub enum StaticStatId {
+    Regenerate,
+    Flying,
+    Lifelink,
+    Trample,
+}
+impl fmt::Display for StaticStatId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Stat {

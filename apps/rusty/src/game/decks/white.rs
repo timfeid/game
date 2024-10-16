@@ -250,48 +250,28 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), a.clone()).await;
+        let a = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), b.clone()).await;
+        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let c = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), c.clone()).await;
+        let c = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), c.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let d = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), b.clone()).await;
+        let d = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\ndestroying creature");
         let d = ga.lock().await.destroy_card(&d).await;
-        Game::process_action_queue(ga.clone(), b.clone()).await;
+        // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.advance_turn().await;
         ga.lock().await.print().await;
     }
@@ -325,33 +305,18 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), a.clone()).await;
+        let a = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), b.clone()).await;
+        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying enchantment");
-        let b = ga
-            .lock()
-            .await
-            .play_card(&player, 0, None)
-            .await
-            .expect("oh");
-        Game::process_action_queue(ga.clone(), b.clone()).await;
+        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         // println!("\n\n\n\nplaying creature");

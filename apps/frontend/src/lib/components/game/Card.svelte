@@ -11,11 +11,11 @@
 	import Ability from './card/ability.svelte';
 
 	export let cardWithDetails: CardWithDetails;
-	export let className: string = '';
 	export let game: GameState | undefined = undefined;
-	export let pile: FrontendPileName;
-	export let cardIndex: number;
-	export let playerIndex: number;
+	// export let pile: FrontendPileName;
+	// export let cardWithDetails.frontend_target.card_index: number;
+	// export let playerIndex: number;
+	export let className: string = '';
 	export { className as class };
 	$: card = cardWithDetails.card;
 
@@ -65,26 +65,27 @@
 <button
 	on:click
 	class:rotate-90={card.tapped}
-	class="flex flex-col card relative w-[184px] h-[184px] transition duration-300 font-serif {className}"
-	data-card-index={cardIndex}
-	data-pile={pile}
-	data-player-index={playerIndex}
+	class:scale-75={card.tapped}
+	class="flex flex-col card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
+	data-card-index={cardWithDetails.frontend_target.card_index}
+	data-pile={cardWithDetails.frontend_target.pile}
+	data-player-index={cardWithDetails.frontend_target.player_index}
 	in:fly={{ y: '-300%', duration: 500 }}
 >
 	<div
 		class:defending={game?.public_info.blocks.find(
 			(a) =>
-				a.blocker.card_index === cardIndex &&
-				a.blocker.pile === pile &&
-				a.blocker.player_index === playerIndex
+				a.blocker.card_index === cardWithDetails.frontend_target.card_index &&
+				a.blocker.pile === cardWithDetails.frontend_target.pile &&
+				a.blocker.player_index === cardWithDetails.frontend_target.player_index
 		)}
 	></div>
 	<div
 		class:attacking={game?.public_info.attacks.find(
 			(a) =>
-				a.attacker.card_index === cardIndex &&
-				a.attacker.pile === pile &&
-				a.attacker.player_index === playerIndex
+				a.attacker.card_index === cardWithDetails.frontend_target.card_index &&
+				a.attacker.pile === cardWithDetails.frontend_target.pile &&
+				a.attacker.player_index === cardWithDetails.frontend_target.player_index
 		)}
 	></div>
 	<div
@@ -116,6 +117,9 @@
 		<div class="card-type mb-2 flex w-full text-xs py-0.5 px-2 font-mono">
 			<div class="text-gray-500 dark:text-stone-600 text-left uppercase">
 				{#if typeof card.card_type === 'string'}
+					{#if card.creature_type}
+						{card.creature_type}
+					{/if}
 					{card.card_type}
 				{:else if card.card_type?.BasicLand}
 					{card.card_type?.BasicLand} Land
@@ -144,10 +148,10 @@
 
 		<div class="text-left mb-6 px-2 text-sm">
 			<p class="text-gray-700 dark:text-gray-300">{card.description}</p>
-			<div>
+			<div class="space-y-1.5">
 				{#each cardWithDetails.abilities as ability}
 					{#if ability.show}
-						<Ability {ability} />
+						<Ability inHand={cardWithDetails.frontend_target.pile === 'Hand'} {ability} />
 					{/if}
 				{/each}
 			</div>

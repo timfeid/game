@@ -39,7 +39,7 @@ function isCardOfType(
 
 function isCreatureTypeCardRequirement(
 	target: CardRequiredTarget
-): target is { CreatureOfType: [CreatureType, CardTargetTeam] } {
+): target is { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } {
 	return typeof target === 'object' && 'CreatureOfType' in target;
 }
 
@@ -103,7 +103,8 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 						const [type] = ability.required_target.CardOfType;
 						// if (team)
 						// TODO: check the team, too
-						if (type === ccard.card.card_type) {
+						console.log(type, ccard.card.card_type);
+						if (JSON.stringify(type) === JSON.stringify(ccard.card.card_type)) {
 							return resolve(frontendTarget);
 						}
 					}

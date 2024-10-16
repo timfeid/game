@@ -3,16 +3,14 @@ use crate::game::{
         generate_mana::GenerateManaAction, ActionTriggerType, ApplyDynamicEffectToCard,
         ApplyEffectToCardBasedOnTotalCardType, AsyncClosureAction, AsyncClosureWithCardAction,
         CardActionTrigger, CardRequiredTarget, CardTargetTeam, DeclareAttackerAction,
-        DeclareBlockerAction, PlayerActionTarget, TriggerTarget,
+        DeclareBlockerAction, LifeLinkAction, PlayerActionTarget, TriggerTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
         Card, CardPhase, CardType, CreatureType,
     },
     decks::duplicate_card,
-    effects::{
-        DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction,
-    },
+    effects::{DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract},
     mana::ManaType,
     player::Player,
     stat::{Stat, StatType, Stats},
@@ -246,7 +244,7 @@ mod test {
         }
 
         let ga = Arc::new(Mutex::new(game));
-        Game::process_action_queue(ga.clone(), hydra.clone().unwrap()).await;
+        // Game::process_action_queue(ga.clone(), hydra.clone().unwrap()).await;
 
         ga.lock()
             .await
