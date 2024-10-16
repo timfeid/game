@@ -14,6 +14,8 @@
 	import CastMandatoryAbility from './dialog/cast-mandatory-ability.svelte';
 
 	export let game_state: GameState;
+
+	$: console.log(game_state);
 	export let turnMessage: LobbyTurnMessage | undefined;
 	export let join_code: string;
 

@@ -107,16 +107,6 @@ impl CardWithDetails {
         original_card_arc: Option<Arc<Mutex<Card>>>,
         game_arc: Option<Arc<Mutex<Game>>>,
     ) -> Vec<AbilityDetails> {
-        if card.tapped {
-            return vec![];
-        }
-
-        if card.current_phase != CardPhase::Ready {
-            if turn_phase == TurnPhase::DeclareBlockers && card.card_type != CardType::Creature {
-                return vec![];
-            }
-        }
-
         let mut abilities = vec![];
         for trigger in card.triggers.iter() {
             match &trigger.trigger_type {
@@ -170,14 +160,15 @@ impl CardWithDetails {
                     if let Some(owner) = &card.owner {
                         let can_pay_mana = { owner.lock().await.can_pay_mana(required_mana).await };
                         if can_pay_mana && within_phase {
-                            let mut meets_requirements = true;
+                            let mut meets_requirements = !card.tapped || !required_tap;
                             if let Some(game_arc) = &game_arc {
                                 if let Some(card) = &original_card_arc {
-                                    meets_requirements = (&trigger.requirements)(
-                                        Arc::clone(game_arc),
-                                        Arc::clone(card),
-                                    )
-                                    .await;
+                                    meets_requirements = meets_requirements
+                                        && (&trigger.requirements)(
+                                            Arc::clone(game_arc),
+                                            Arc::clone(card),
+                                        )
+                                        .await;
                                 }
                             }
 
@@ -189,7 +180,7 @@ impl CardWithDetails {
                                 action_type: if *required_tap {
                                     ActionType::Tap
                                 } else {
-                                    ActionType::None
+                                    ActionType::Instant
                                 },
                                 show: in_play || required_with_phases.is_none(),
                                 meets_requirements,
@@ -334,8 +325,6 @@ pub struct Game {
     pub current_turn: Option<Turn>,
     pub turn_number: usize,
     #[serde(skip_serializing, skip_deserializing)]
-    pub action_queue: Vec<Arc<dyn Action + Send + Sync>>,
-    #[serde(skip_serializing, skip_deserializing)]
     pub effect_manager: EffectManager,
     #[serde(skip_serializing, skip_deserializing)]
     pub event_stack: Vec<Arc<dyn Action + Send + Sync>>,
@@ -347,7 +336,7 @@ pub struct Game {
     pub broadcast_sender: Option<broadcast::Sender<Option<LobbyCommand>>>,
     pub turn_messages: Vec<String>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub abilities: HashMap<String, Ability>,
+    pub async_abilities: HashMap<String, Ability>,
 }
 
 impl fmt::Debug for Game {
@@ -356,7 +345,6 @@ impl fmt::Debug for Game {
             .field("players", &self.players)
             .field("current_turn", &self.current_turn)
             .field("turn_number", &self.turn_number)
-            .field("action_queue", &self.action_queue)
             .field("effect_manager", &self.effect_manager)
             .field("event_stack", &self.event_stack)
             .field("combat", &self.combat)
@@ -417,19 +405,19 @@ impl Game {
             players: vec![],
             current_turn: None,
             turn_number: 0,
-            action_queue: vec![],
             effect_manager: EffectManager::new(),
             event_stack: vec![],
             combat: Combat::new(),
             current_priority_player: None,
             broadcast_sender: Some(sender),
             turn_messages: vec![],
-            abilities: HashMap::new(),
+            async_abilities: HashMap::new(),
         }
     }
 
     pub async fn ask_mandatory_player_ability(&mut self, ability: Ability) {
-        self.abilities.insert(ability.id.clone(), ability.clone());
+        self.async_abilities
+            .insert(ability.id.clone(), ability.clone());
         if let Some(ref sender) = self.broadcast_sender {
             let player = ability
                 .card_arc
@@ -463,7 +451,8 @@ impl Game {
     }
 
     pub async fn request_player_ability(&mut self, ability: Ability) {
-        self.abilities.insert(ability.id.clone(), ability.clone());
+        self.async_abilities
+            .insert(ability.id.clone(), ability.clone());
         if let Some(ref sender) = self.broadcast_sender {
             let player = ability
                 .card_arc
@@ -529,7 +518,7 @@ impl Game {
     ) -> Result<(), String> {
         let ability = {
             let game = game_arc.lock().await;
-            game.abilities
+            game.async_abilities
                 .get(&ability_id)
                 .ok_or_else(|| "No ability with that id".to_string())?
                 .clone()
@@ -595,7 +584,7 @@ impl Game {
         target: Option<EffectTarget>,
     ) -> Result<(), String> {
         let ability = self
-            .abilities
+            .async_abilities
             .remove(&ability_id)
             .ok_or("No ability with that id".to_string())?;
 
@@ -693,6 +682,27 @@ impl Game {
             .await;
     }
 
+    pub async fn destroy_dead_creatures(&mut self) {
+        let mut cards_to_destroy = vec![];
+        {
+            for player_arc in self.players.clone() {
+                let player = player_arc.lock().await;
+                for card_arc in &player.cards_in_play {
+                    let card = card_arc.lock().await;
+                    if card.card_type == CardType::Creature
+                        && card.get_stat_value(StatType::Toughness) <= 0
+                    {
+                        println!("hello?");
+                        cards_to_destroy.push(Arc::clone(card_arc));
+                    }
+                }
+            }
+        }
+        for card_arc in cards_to_destroy {
+            self.destroy_card(&card_arc).await;
+        }
+    }
+
     pub async fn remove_references_to(&mut self, card: &Arc<Mutex<Card>>) {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
 
@@ -771,6 +781,7 @@ impl Game {
         player_arc
     }
 
+    // TODO: remove this in favor of activate card action
     pub async fn attach_card_action(
         &mut self,
         player: &Arc<Mutex<Player>>,
@@ -789,6 +800,7 @@ impl Game {
         };
 
         self.execute_actions(&mut actions).await;
+        self.destroy_dead_creatures().await;
 
         Ok(())
     }
@@ -808,22 +820,25 @@ impl Game {
             }
         }
         let game_arc = Arc::new(Mutex::new(std::mem::take(self)));
-        let mut actions = {
-            Player::execute_action(
-                Arc::clone(player),
-                in_play_index,
-                target,
-                game_arc.clone(),
-                trigger_id,
-            )
-            .await?
-        };
+
+        let response = Player::execute_action(
+            Arc::clone(player),
+            in_play_index,
+            target,
+            game_arc.clone(),
+            trigger_id,
+        )
+        .await;
         let mut game_unlocked = game_arc.lock().await;
         *self = std::mem::take(&mut *game_unlocked);
-
-        self.execute_actions(&mut actions).await;
-
-        Ok(())
+        match response {
+            Ok(mut actions) => {
+                self.execute_actions(&mut actions).await;
+                self.destroy_dead_creatures().await;
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     pub async fn activate_card_action_old(
@@ -909,9 +924,8 @@ impl Game {
         };
 
         self.add_to_stack(action);
-        self.effect_manager
-            .apply_effects(self.current_turn.clone().unwrap())
-            .await;
+        self.resolve_stack().await;
+        self.destroy_dead_creatures().await;
 
         Ok(card)
     }
@@ -1097,17 +1111,15 @@ impl Game {
 
         for action in actions_to_execute {
             println!("Applying action {:?}", action);
-            action.apply(self).await;
+            self.event_stack.push(action);
         }
         let actions_to_execute = self.collect_omnipresent_actions().await;
         for action in actions_to_execute {
             println!("Applying action {:?}", action);
-            action.apply(self).await;
+            self.event_stack.push(action);
         }
 
-        self.effect_manager
-            .apply_effects(self.current_turn.clone().unwrap())
-            .await;
+        self.resolve_stack().await;
     }
 
     pub fn reset_turn_messages(&mut self) {

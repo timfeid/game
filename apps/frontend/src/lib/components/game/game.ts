@@ -134,7 +134,6 @@ export async function waitForTarget(
 	game: GameState,
 	forPlay = false
 ): Promise<null | FrontendTarget> {
-	console.log(ability);
 	if (!ability || ability.required_target === 'None') {
 		return null;
 	}

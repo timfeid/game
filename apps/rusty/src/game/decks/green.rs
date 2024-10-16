@@ -9,7 +9,7 @@ use crate::game::{
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
-        Card, CardPhase, CardType, CreatureType,
+        Card, CardPhase, CardType, Counter, CreatureType,
     },
     decks::duplicate_card,
     effects::{Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction, StatModifierEffect},
@@ -45,6 +45,68 @@ fn create_forest() -> Card {
         CardType::BasicLand(ManaType::Green),
         vec![],
         vec![],
+    )
+}
+
+pub fn create_druid() -> Card {
+    create_creature_card!(
+        "Devoted Druid",
+        CreatureType::Elf,
+        "",
+        0,
+        2,
+        [ManaType::Colorless, ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Add {G} to your mana pool.".to_string(),
+                vec![],
+                None,
+                true
+            ),
+            CardRequiredTarget::None,
+            Arc::new(GenerateManaAction {
+                mana_to_add: vec![ManaType::Green],
+                target: PlayerActionTarget::Owner
+            })
+        ),
+        CardActionTrigger::new_with_requirements(
+            ActionTriggerType::AbilityWithinPhases(
+                "Put a -1/-1 counter on Devoted Druid: Untap Devoted Druid".to_string(),
+                vec![],
+                None,
+                false
+            ),
+            CardRequiredTarget::None,
+            Arc::new(AsyncClosureAction::new(Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 card: Arc<Mutex<Card>>|
+                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                    Box::pin(async move {
+                        Card::add_counter(
+                            card.clone(),
+                            &game,
+                            Counter::PowerToughnessModifier(-1, -1),
+                        )
+                        .await;
+                        card.lock().await.untap();
+                    })
+                }
+            ))),
+            Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 card: Arc<Mutex<Card>>|
+                 -> Pin<Box<dyn Future<Output = bool> + Send>> {
+                    Box::pin(async move {
+                        if let Ok(card) = card.try_lock() {
+                            return card.tapped;
+                        }
+
+                        false
+                    })
+                }
+            )
+        )
     )
 }
 
@@ -235,8 +297,9 @@ pub fn create_green_deck() -> Vec<Card> {
     deck.append(&mut duplicate_card(create_forest(), 4));
     // deck.append(&mut duplicate_card(create_priest_of_titania(), 4));
     // deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 4));
-
-    deck.append(&mut duplicate_card(create_wirewood(), 4));
+    // deck.append(&mut duplicate_card(create_wirewood(), 4));
+    // deck.append(&mut duplicate_card(create_wirewood(), 4));
+    deck.append(&mut duplicate_card(create_druid(), 4));
 
     deck
 }
@@ -248,9 +311,12 @@ mod test {
 
     use crate::{
         game::{
+            action::ActionTriggerType,
             card::{Card, CardPhase},
             decks::{
-                green::{create_forest, create_leaf_crowned_visionary, create_wirewood},
+                green::{
+                    create_druid, create_forest, create_leaf_crowned_visionary, create_wirewood,
+                },
                 Deck,
             },
             effects::EffectTarget,
@@ -320,7 +386,7 @@ mod test {
         let ability_id = ga
             .lock()
             .await
-            .abilities
+            .async_abilities
             .keys()
             .find(|x| true)
             .unwrap()
@@ -393,6 +459,80 @@ mod test {
         ga.lock()
             .await
             .activate_card_action_old(&player, 1, None)
+            .await
+            .expect("oh no?");
+        ga.lock().await.print().await;
+    }
+    #[tokio::test]
+    async fn test_green_3() {
+        let mut game = Game::new();
+        let player = game
+            .add_player(Player::new(
+                "test",
+                0,
+                vec![
+                    create_druid(),
+                    create_druid(),
+                    create_forest(),
+                    create_forest(),
+                ],
+            ))
+            .await;
+
+        player.lock().await.draw_card();
+        player.lock().await.draw_card();
+        let a = player.lock().await.draw_card();
+        let b = player.lock().await.draw_card();
+        game.start_turn(0).await;
+        game.advance_turn().await;
+        // for _ in 0..18 {
+        // }
+
+        {
+            let clone = Arc::clone(&player);
+            let mut player = clone.lock().await;
+            let mut cards: Vec<Arc<Mutex<Card>>> = player.cards_in_hand.drain(0..4).collect();
+
+            // Append the drained cards to `cards_in_play`
+            player.cards_in_play.append(&mut cards);
+        }
+
+        let ga = Arc::new(Mutex::new(game));
+        ga.lock().await.print().await;
+
+        {
+            a.clone().unwrap().lock().await.current_phase = CardPhase::Ready;
+            b.clone().unwrap().lock().await.current_phase = CardPhase::Ready;
+        }
+
+        let turn = ga.clone().lock().await.current_turn.clone().unwrap();
+
+        let details =
+            CardWithDetails::from_card_arc(&a.unwrap(), ga.lock().await.current_phase(), true, &ga)
+                .await;
+        println!("{:?}", details.abilities);
+
+        ga.lock()
+            .await
+            .activate_card_action(&player, 2, None, details.abilities[0].id.clone())
+            .await
+            .expect("oh no?");
+
+        ga.lock()
+            .await
+            .activate_card_action(&player, 2, None, details.abilities[1].id.clone())
+            .await
+            .expect("oh no?");
+
+        ga.lock()
+            .await
+            .activate_card_action(&player, 2, None, details.abilities[0].id.clone())
+            .await
+            .expect("oh no?");
+
+        ga.lock()
+            .await
+            .activate_card_action(&player, 2, None, details.abilities[1].id.clone())
             .await
             .expect("oh no?");
         ga.lock().await.print().await;

@@ -98,6 +98,7 @@ impl CardAction for ResetCardAction {
             let card = card.clone();
             let mut card_l = card.lock().await;
             card_l.is_countered = false;
+            card_l.counters = HashMap::new();
         }
 
         game.effect_manager

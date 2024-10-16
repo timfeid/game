@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import type { CardWithDetails, FrontendTarget, GameState, PlayerState } from '@gangsta/rusty';
+	import type {
+		AbilityDetails,
+		CardWithDetails,
+		FrontendTarget,
+		GameState,
+		PlayerState
+	} from '@gangsta/rusty';
 	import { RSPCError } from '@rspc/client';
 	import { RectangleVertical } from 'lucide-svelte';
 	import HeartPulse from 'lucide-svelte/icons/heart-pulse';
@@ -21,22 +27,18 @@
 	async function executeAction(
 		index: number,
 		card: CardWithDetails,
-		target: FrontendTarget | null
+		target: FrontendTarget | null,
+		ability: AbilityDetails
 	) {
-		let action = card.abilities[0]?.action_type;
-		console.log(action);
-		if (!action) {
-			return;
-		}
 		try {
 			await client.mutation([
-				action === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
+				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
 				{
 					code,
 					player_index: player.player_index,
 					in_play_index: index,
 					target,
-					trigger_id: card.abilities[0].id
+					trigger_id: ability.id
 				}
 			]);
 		} catch (e) {
@@ -45,6 +47,10 @@
 			}
 			toast.error('Unknown error!');
 		}
+	}
+
+	async function selectAbility(card: CardWithDetails) {
+		return card.abilities.find((c) => c.meets_requirements);
 	}
 
 	async function actionSpell(index: number) {
@@ -56,9 +62,12 @@
 			return;
 		}
 		const card = player.public_info.cards_in_play[index];
-		if (self.player_index === player.player_index) {
-			const target = await waitForTarget(card.abilities[0], game);
-			return await executeAction(index, card, target);
+		if (self.player_index === player.player_index && card) {
+			const ability = await selectAbility(card);
+			if (ability) {
+				const target = await waitForTarget(ability, game);
+				return await executeAction(index, card, target, ability);
+			}
 		}
 	}
 
@@ -73,13 +82,14 @@
 		const card = player.public_info.cards_in_play[index];
 		if (self.player_index === player.player_index) {
 			try {
-				const ability = card.abilities.find((a) => a.meets_requirements) || null;
+				console.log(card.abilities);
+				const ability = await selectAbility(card);
 				if (!ability) {
 					throw new Error('This card has no ability right now.');
 				}
 
 				const target = await waitForTarget(ability, game);
-				await executeAction(index, card, target);
+				await executeAction(index, card, target, ability);
 			} catch (e) {
 				toast.error((e as Error).toString());
 			}

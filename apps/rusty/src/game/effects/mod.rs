@@ -93,11 +93,6 @@ impl EffectManager {
         for effect_id in effect_ids {
             if let Some(effect_arc) = self.effects.clone().get(&effect_id) {
                 let mut effect = effect_arc.lock().await;
-                println!(
-                    "Applying effect {:?} for card {}",
-                    effect,
-                    effect.get_source_card().clone().unwrap().lock().await.name
-                );
                 {
                     effect.apply(turn.clone()).await;
                 }

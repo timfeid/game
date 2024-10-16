@@ -507,7 +507,7 @@ impl Player {
             // card_l.action_target = target.clone();
 
             let (actions, requires_tap) = Card::collect_manual_actions(
-                Arc::clone(&card),
+                card.clone(),
                 phase,
                 target.clone(),
                 trigger_id,

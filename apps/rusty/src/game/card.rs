@@ -19,7 +19,7 @@ use super::action::{
     CardActionWrapper, CardRequiredTarget, PlayerAction, PlayerActionTrigger, ResetCardAction,
 };
 
-use super::effects::EffectID;
+use super::effects::{EffectID, ExpireContract, StatModifierEffect};
 use super::mana::ManaType;
 use super::player;
 use super::turn::Turn;
@@ -67,6 +67,11 @@ pub enum CardPhase {
     Cancelled,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
+pub enum Counter {
+    PowerToughnessModifier(i8, i8),
+}
+
 #[derive(Type, Debug, Deserialize, Serialize, Clone)]
 pub struct Card {
     pub creature_type: Option<CreatureType>,
@@ -93,6 +98,7 @@ pub struct Card {
     pub damage_taken: i8,
     pub is_countered: bool,
     pub id: String,
+    pub counters: HashMap<String, Counter>,
 }
 
 impl Card {
@@ -123,6 +129,7 @@ impl Card {
             damage_taken: 0,
             damage_dealt_to_players: 0,
             is_countered: false,
+            counters: HashMap::new(),
         };
         card.triggers.push(CardActionTrigger::new(
             ActionTriggerType::CardDestroyed,
@@ -131,6 +138,45 @@ impl Card {
         ));
 
         card
+    }
+
+    pub async fn add_counter(card: Arc<Mutex<Self>>, game: &Arc<Mutex<Game>>, counter: Counter) {
+        let id = Card::activate_counter(card.clone(), &counter, game).await;
+        card.lock().await.counters.insert(id, counter);
+    }
+
+    pub async fn activate_counter(
+        card: Arc<Mutex<Self>>,
+        counter: &Counter,
+        game: &Arc<Mutex<Game>>,
+    ) -> String {
+        let id = Ulid::new().to_string();
+        match counter {
+            Counter::PowerToughnessModifier(power, toughness) => {
+                let mut game = game.lock().await;
+                game.effect_manager.add_effect(
+                    EffectID(format!("counter-{}-toughness", id)),
+                    Arc::new(Mutex::new(StatModifierEffect::new(
+                        EffectTarget::Card(card.clone()),
+                        StatType::Toughness,
+                        toughness.clone(),
+                        ExpireContract::Never,
+                        None,
+                    ))),
+                );
+                game.effect_manager.add_effect(
+                    EffectID(format!("counter-{}-power", id)),
+                    Arc::new(Mutex::new(StatModifierEffect::new(
+                        EffectTarget::Card(card),
+                        StatType::Power,
+                        power.clone(),
+                        ExpireContract::Never,
+                        None,
+                    ))),
+                );
+            }
+        }
+        id
     }
 
     pub fn is_useless(&self, has_effects: bool) -> bool {
@@ -478,7 +524,11 @@ impl Card {
             lines.push(format!("│{: <width$}│", " ", width = width - 2));
         }
 
-        lines.push(format!("└{}┘", "─".repeat(width - 2)));
+        lines.push(format!(
+            "└{}{}┘",
+            if self.tapped { "t" } else { "─" },
+            "─".repeat(width - 3)
+        ));
         lines
     }
 

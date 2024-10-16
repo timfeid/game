@@ -221,6 +221,11 @@ impl LobbyController {
             if let Ok(mut post_stream) = manager.subscribe_to_lobby_updates(join_code, access_token).await {
                 while let Some(mut lobby_data) = post_stream.next().await {
                         match &lobby_data {
+                            LobbyCommand::MandatoryExecuteAbility(ability_details) => {
+                                if ability_details.player_id == user_claims.sub.clone() {
+                                    yield lobby_data;
+                                }
+                            },
                             LobbyCommand::AskExecuteAbility(ability_details) => {
                                 if ability_details.player_id == user_claims.sub.clone() {
                                     yield lobby_data;

@@ -80,19 +80,20 @@ impl Lobby {
             let mut attacks = vec![];
             let cloned_game = self.cloned_game().await;
             let game = cloned_game.lock().await;
-            let turn = game.current_turn.clone().unwrap();
-            let player = turn.current_player;
-            for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
-                for (attacker, target) in game.combat.attackers.iter() {
-                    if Arc::ptr_eq(attacker, card) {
-                        attacks.push(Attack {
-                            target: game.frontend_target_from_effect_target(target).await,
-                            attacker: FrontendCardTarget {
-                                player_index: turn.current_player_index,
-                                pile: FrontendPileName::Play,
-                                card_index: index as i32,
-                            },
-                        });
+            if let Some(turn) = game.current_turn.clone() {
+                let player = turn.current_player;
+                for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
+                    for (attacker, target) in game.combat.attackers.iter() {
+                        if Arc::ptr_eq(attacker, card) {
+                            attacks.push(Attack {
+                                target: game.frontend_target_from_effect_target(target).await,
+                                attacker: FrontendCardTarget {
+                                    player_index: turn.current_player_index,
+                                    pile: FrontendPileName::Play,
+                                    card_index: index as i32,
+                                },
+                            });
+                        }
                     }
                 }
             }
