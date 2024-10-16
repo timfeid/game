@@ -83,25 +83,7 @@ fn create_angelic_accord() -> Card {
                         })
                     }
                 )))
-            ),
-            CardActionTrigger::new(
-                ActionTriggerType::Attached,
-                CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any),
-                Arc::new(ApplyEffectToCardBasedOnTotalCardType {
-                    card_type: CardType::BasicLand(ManaType::Green),
-
-                    effects_generator: Arc::new(|target, source_card, amount_calculator| {
-                        vec![Arc::new(Mutex::new(DynamicStatModifierEffect::new(
-                            target,
-                            StatType::Toughness,
-                            amount_calculator.clone(),
-                            ExpireContract::Never,
-                            source_card.clone(),
-                            false,
-                        )))]
-                    }),
-                }),
-            ),
+            )
         ],
         CardPhase::Ready,
         CardType::Enchantment,

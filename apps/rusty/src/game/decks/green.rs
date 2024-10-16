@@ -1,18 +1,21 @@
 use crate::game::{
     action::{
-        generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyEffectToPlayerCardType,
-        AsyncClosureAction, AsyncClosureWithCardAction, CardAction, CardActionTarget,
-        CardActionTrigger, CardActionWrapper, CardRequiredTarget, CardTargetTeam,
-        CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility, DeclareAttackerAction,
-        DeclareBlockerAction, DrawCardAction, DrawCardCardAction, PlayerActionTarget,
-        TriggerTarget,
+        generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
+        ApplyEffectToPlayerCardType, ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
+        AsyncClosureWithCardAction, CardAction, CardActionTarget, CardActionTrigger,
+        CardActionWrapper, CardRequiredTarget, CardTargetTeam, CastMandatoryAdditionalAbility,
+        CastOptionalAdditionalAbility, DeclareAttackerAction, DeclareBlockerAction, DrawCardAction,
+        DrawCardCardAction, PlayerActionTarget, TriggerTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
         Card, CardPhase, CardType, Counter, CreatureType,
     },
     decks::duplicate_card,
-    effects::{Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction, StatModifierEffect},
+    effects::{
+        DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract, LifeLinkAction,
+        StatModifierEffect,
+    },
     mana::ManaType,
     player::Player,
     stat::{Stat, StatType, Stats},
@@ -106,6 +109,94 @@ pub fn create_druid() -> Card {
                     })
                 }
             )
+        )
+    )
+}
+
+pub fn create_elvish() -> Card {
+    create_creature_card!(
+        "Elvish Archdruid",
+        CreatureType::Elf,
+        "Other Elf creatures you control get +1/+1.",
+        1,
+        1,
+        [ManaType::Colorless, ManaType::Green, ManaType::Green],
+        [],
+        CardActionTrigger::new(
+            ActionTriggerType::Continuous,
+            CardRequiredTarget::None,
+            Arc::new(ApplyEffectsToPlayerCreatureType::new(
+                CreatureType::Elf,
+                Arc::new(
+                    move |target,
+                          source_card,
+                          effect_id|
+                          -> Pin<
+                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+                            if let EffectTarget::Card(card) = &target {
+                                if !Arc::ptr_eq(card, &source_card) {
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Power,
+                                        amount: 1,
+                                        expires: ExpireContract::Never,
+                                        id: EffectID(format!(
+                                            "{}-{}-power",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                        target: target.clone(),
+                                        stat_type: StatType::Toughness,
+                                        amount: 1,
+                                        expires: ExpireContract::Never,
+                                        id: EffectID(format!(
+                                            "{}-{}-toughness",
+                                            source_card.clone().lock().await.id,
+                                            effect_id
+                                        )),
+                                        applied: false,
+                                        source_card: Some(source_card.clone()),
+                                        previous_turn: None,
+                                    })));
+                                }
+                            }
+                            effects
+                        })
+                    },
+                ),
+            )),
+        ),
+        CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Add {G} for each Elf on the battlefield.".to_string(),
+                vec![],
+                None,
+                true
+            ),
+            CardRequiredTarget::None,
+            Arc::new(AsyncClosureAction::new(Arc::new(
+                |game: Arc<Mutex<Game>>,
+                 card: Arc<Mutex<Card>>|
+                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                    Box::pin(async move {
+                        let owner = card.lock().await.owner.clone().unwrap();
+                        let cards_in_play = &owner.lock().await.cards_in_play.clone();
+                        for card in cards_in_play {
+                            if card.lock().await.creature_type == Some(CreatureType::Elf) {
+                                owner.lock().await.mana_pool.add_mana(ManaType::Green);
+                            }
+                        }
+                    })
+                }
+            )))
         )
     )
 }
@@ -299,8 +390,8 @@ pub fn create_green_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 4));
     // deck.append(&mut duplicate_card(create_wirewood(), 4));
     // deck.append(&mut duplicate_card(create_wirewood(), 4));
-    deck.append(&mut duplicate_card(create_druid(), 4));
-
+    // deck.append(&mut duplicate_card(create_druid(), 4));
+    deck.append(&mut duplicate_card(create_elvish(), 4));
     deck
 }
 

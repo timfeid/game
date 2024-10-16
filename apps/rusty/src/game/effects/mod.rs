@@ -181,7 +181,7 @@ pub struct StatModifierEffect {
     pub id: EffectID,
     pub applied: bool,
     pub source_card: Option<Arc<Mutex<Card>>>,
-    previous_turn: Option<i32>,
+    pub previous_turn: Option<i32>,
 }
 
 impl StatModifierEffect {

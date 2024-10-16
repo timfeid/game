@@ -1121,23 +1121,63 @@ impl CardAction for ApplyEffectToCardBasedOnTotalCardType {
     }
 }
 
-pub struct ApplyEffectToPlayerCreatureType {
+pub struct ApplyEffectsToPlayerCreatureType {
+    pub id: String,
+    // pub amount_calculator:
+    //     Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync>,
     pub creature_type: CreatureType,
-    pub effect_generator: Arc<
-        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
+    pub effects_generator: Arc<
+        dyn Fn(
+                EffectTarget,
+                Arc<Mutex<Card>>,
+                // Arc<
+                //     dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                //         + Send
+                //         + Sync,
+                // >,
+                String,
+            )
+                -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>>
             + Send
             + Sync,
     >,
 }
 
-impl Debug for ApplyEffectToPlayerCreatureType {
+impl Debug for ApplyEffectsToPlayerCreatureType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApplyEffectToPlayerCreatureType").finish()
     }
 }
 
+impl ApplyEffectsToPlayerCreatureType {
+    pub fn new(
+        creature_type: CreatureType,
+        effects_generator: Arc<
+            dyn Fn(
+                    EffectTarget,
+                    Arc<Mutex<Card>>,
+                    // Arc<
+                    //     dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>>
+                    //         + Send
+                    //         + Sync,
+                    // >,
+                    String,
+                ) -> Pin<
+                    Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                > + Send
+                + Sync,
+        >,
+    ) -> Self {
+        ApplyEffectsToPlayerCreatureType {
+            creature_type,
+            effects_generator,
+            id: Ulid::new().to_string(),
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl CardAction for ApplyEffectToPlayerCreatureType {
+impl CardAction for ApplyEffectsToPlayerCreatureType {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1162,14 +1202,19 @@ impl CardAction for ApplyEffectToPlayerCreatureType {
                 };
 
                 if card_type_matches {
-                    let source_card = Some(Arc::clone(&card_arc));
-                    let effect = (self.effect_generator)(
+                    let source_card = Arc::clone(&card_arc);
+                    let effects = (self.effects_generator)(
                         EffectTarget::Card(Arc::clone(&card_in_play)),
                         source_card,
-                    );
-                    let effect_id = effect.lock().await.get_final_id();
+                        self.id.clone(),
+                    )
+                    .await;
+                    for effect in effects {
+                        let effect_id = effect.lock().await.get_final_id();
+                        // println!("received effect from list {:?}", effect_id);
 
-                    game.effect_manager.add_effect(effect_id, effect);
+                        game.effect_manager.add_effect(effect_id, effect);
+                    }
                 } else {
                     // println!("Card does not match card type {:?}", self.card_type);
                 }
