@@ -2,9 +2,11 @@
 	import type {
 		Card,
 		CardPhase,
+		CardType,
 		CardWithDetails,
 		FrontendPileName,
-		GameState
+		GameState,
+		ManaType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
 	import ManaBubble from './mana-bubble.svelte';
@@ -17,6 +19,7 @@
 	// export let playerIndex: number;
 	export let className: string = '';
 	export { className as class };
+	export let noTooltips = false;
 	$: card = cardWithDetails.card;
 
 	// Function to display the current phase in a readable format
@@ -60,6 +63,20 @@
 			extractDamageAndDefense(card.stats);
 		}
 	}
+
+	function isAdvancedLand(cardType: CardType): cardType is { AdvancedLand: ManaType } {
+		return typeof cardType !== 'string' && 'AdvancedLand' in cardType;
+	}
+
+	function isBasicLand(cardType: CardType): cardType is { BasicLand: ManaType } {
+		return typeof cardType !== 'string' && 'BasicLand' in cardType;
+	}
+
+	$: manaType = isBasicLand(card.card_type)
+		? card.card_type.BasicLand
+		: isAdvancedLand(card.card_type)
+			? card.card_type.AdvancedLand
+			: null;
 </script>
 
 <button
@@ -93,21 +110,21 @@
 	>
 		<div
 			class="card-header flex items-center justify-between w-full py-0.5 px-2 w-full"
-			class:bg-green-200={card.card_type?.BasicLand === 'Green'}
-			class:bg-blue-200={card.card_type?.BasicLand === 'Blue'}
-			class:bg-black={card.card_type?.BasicLand === 'Black'}
-			class:bg-white={card.card_type?.BasicLand === 'White'}
-			class:text-white={card.card_type?.BasicLand === 'Black'}
-			class:text-black={card.card_type?.BasicLand === 'White'}
-			class:dark:bg-green-800={card.card_type?.BasicLand === 'Green'}
-			class:dark:bg-blue-800={card.card_type?.BasicLand === 'Blue'}
-			class:dark:bg-black={card.card_type?.BasicLand === 'Black'}
-			class:dark:bg-white={card.card_type?.BasicLand === 'White'}
+			class:bg-green-200={manaType === 'Green'}
+			class:bg-blue-200={manaType === 'Blue'}
+			class:bg-black={manaType === 'Black'}
+			class:bg-white={manaType === 'White'}
+			class:text-white={manaType === 'Black'}
+			class:text-black={manaType === 'White'}
+			class:dark:bg-green-800={manaType === 'Green'}
+			class:dark:bg-blue-800={manaType === 'Blue'}
+			class:dark:bg-black={manaType === 'Black'}
+			class:dark:bg-white={manaType === 'White'}
 		>
 			<h2 class="text-sm font-bold truncate">
 				{card.name}
 			</h2>
-			<div class="absolute flex space-x-1 bottom-2 right-2">
+			<div class="absolute flex space-x-0.5 top-2 right-2">
 				{#each card.cost as color}
 					<ManaBubble {color} />
 				{/each}
@@ -121,8 +138,10 @@
 						{card.creature_type}
 					{/if}
 					{card.card_type}
-				{:else if card.card_type?.BasicLand}
-					{card.card_type?.BasicLand} Land
+				{:else if isBasicLand(card.card_type)}
+					Basic Land
+				{:else if isAdvancedLand(card.card_type)}
+					Land
 				{/if}
 			</div>
 			{#if !!damage || !!defense}
@@ -151,7 +170,11 @@
 			<div class="space-y-1.5">
 				{#each cardWithDetails.abilities as ability}
 					{#if ability.show}
-						<Ability inHand={cardWithDetails.frontend_target.pile === 'Hand'} {ability} />
+						<Ability
+							{noTooltips}
+							inHand={cardWithDetails.frontend_target.pile === 'Hand'}
+							{ability}
+						/>
 					{/if}
 				{/each}
 			</div>

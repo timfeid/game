@@ -4,8 +4,12 @@ pub mod green;
 pub mod red;
 pub mod white;
 
+use black::create_black_deck;
+use blue::create_blue_deck;
+use green::{create_green_deck, create_green_deck_v2};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use red::create_red_deck;
 use std::borrow::BorrowMut;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,6 +17,7 @@ use std::sync::Arc;
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use ulid::Ulid;
+use white::create_angels_deck;
 
 use crate::game::action::generate_mana::GenerateManaAction;
 use crate::game::action::{
@@ -30,6 +35,7 @@ use crate::game::card::Card;
 use crate::game::stat::Stat;
 use crate::game::turn::TurnPhase;
 use crate::game::Game;
+use crate::lobby::lobby::DeckSelector;
 
 use super::player::Player;
 
@@ -52,6 +58,20 @@ fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
 }
 
 impl Deck {
+    pub fn cards_from_selection(selection: &DeckSelector) -> Vec<Card> {
+        match selection {
+            DeckSelector::Elves => create_green_deck(),
+            DeckSelector::Elves2 => create_green_deck_v2(),
+            DeckSelector::Blue => create_blue_deck(),
+            DeckSelector::Black => create_black_deck(),
+            DeckSelector::Angels => create_angels_deck(),
+            DeckSelector::Red => create_red_deck(),
+        }
+    }
+    pub fn new_from_selection(selection: &DeckSelector) -> Self {
+        Deck::new(Deck::cards_from_selection(selection))
+    }
+
     pub fn new(cards: Vec<Card>) -> Self {
         Self {
             draw_pile: cards.into_iter().map(|c| Arc::new(Mutex::new(c))).collect(),

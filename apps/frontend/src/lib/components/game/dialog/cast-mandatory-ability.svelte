@@ -21,7 +21,7 @@
 
 		const target = await waitForTarget(ability.details, game);
 		return await client.mutation([
-			'lobby.respond_mandatory_ability',
+			'lobby.respond.mandatory_ability',
 			{ code, target, ability_id: ability.details.id }
 		]);
 	}

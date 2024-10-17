@@ -12,6 +12,16 @@ impl LobbyChat {
         Self { user_id, message }
     }
 }
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct DeckDetails {
+    cards: Vec<CardWithCount>,
+}
+
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub struct CardWithCount {
+    card: CardWithDetails,
+    count: i32,
+}
 
 #[derive(Type, Deserialize, Serialize, Debug, Clone)]
 pub struct LobbyData {
@@ -123,7 +133,8 @@ use ulid::Ulid;
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
 pub enum DeckSelector {
-    Green,
+    Elves,
+    Elves2,
     Blue,
     Black,
     Angels,
@@ -133,6 +144,7 @@ pub enum DeckSelector {
 use crate::{
     error::{AppError, AppResult},
     game::{
+        card::Card,
         decks::{
             black::create_black_deck, blue::create_blue_deck, green::create_green_deck,
             red::create_red_deck, white::create_angels_deck, Deck,
@@ -201,17 +213,53 @@ impl Lobby {
         self
     }
 
+    pub async fn list_desks(&mut self, user: &Claims) -> Vec<DeckSelector> {
+        return vec![DeckSelector::Elves, DeckSelector::Elves2];
+    }
+
+    pub async fn get_deck_info(&self, deck: DeckSelector) -> DeckDetails {
+        let cards = Deck::cards_from_selection(&deck);
+        let mut card_map: HashMap<String, (CardWithDetails, usize)> = HashMap::new();
+
+        // Group the cards by name
+        for card in cards {
+            let card_details = CardWithDetails::from_card(card).await;
+            let card_name = card_details.card.name.clone(); // Assuming CardWithDetails has a `name` field
+
+            card_map
+                .entry(card_name)
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((card_details, 1));
+        }
+
+        // Convert the HashMap into a Vec of CardWithCount
+        let mut cards_with_count: Vec<CardWithCount> = card_map
+            .into_iter()
+            .map(|(_, (card, count))| CardWithCount {
+                card,
+                count: count as i32,
+            })
+            .collect();
+
+        // Sort by card count (descending) and name (ascending)
+        cards_with_count.sort_by(|a, b| {
+            // First compare by count (descending)
+            b.count
+                .cmp(&a.count)
+                // Then compare by name (ascending) if counts are the same
+                .then_with(|| a.card.card.name.cmp(&b.card.card.name))
+        });
+
+        DeckDetails {
+            cards: cards_with_count,
+        }
+    }
+
     pub async fn ready(&mut self, user: &Claims) -> &mut Self {
         if let Some(player) = self.data.game_state.players.get_mut(&user.sub) {
             player.status = PlayerStatus::Ready;
             let mut p = player.player.lock().await;
-            let deck = Deck::new(match player.deck {
-                DeckSelector::Green => create_green_deck(),
-                DeckSelector::Blue => create_blue_deck(),
-                DeckSelector::Black => create_black_deck(),
-                DeckSelector::Angels => create_angels_deck(),
-                DeckSelector::Red => create_red_deck(),
-            });
+            let deck = Deck::new_from_selection(&player.deck);
             deck.set_owner(&player.player).await;
 
             p.deck = deck;

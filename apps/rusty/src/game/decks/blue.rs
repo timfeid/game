@@ -113,7 +113,7 @@ pub fn create_unsummon() -> Card {
         "Return target creature to its owner's hand.",
         vec![CardActionTrigger::new(
             ActionTriggerType::CardPlayedFromHand,
-            CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any),
+            CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any, None),
             Arc::new(ReturnToHandAction {}),
         )],
         CardPhase::Ready,

@@ -3,7 +3,7 @@
 	import Menu from '$lib/components/ui/page/menu.svelte';
 </script>
 
-<div class="sticky top-0 w-full border-b flex h-12 items-center text-sm bg-secondary">
+<div class="sticky z-[100] top-0 w-full border-b flex h-12 items-center text-sm bg-secondary">
 	<div class="container items-center flex w-full !px-3">
 		<div class="text-muted">gangsta</div>
 		<div class="ml-auto">

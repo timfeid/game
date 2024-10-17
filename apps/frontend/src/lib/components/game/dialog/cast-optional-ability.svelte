@@ -21,7 +21,7 @@
 
 		const target = await waitForTarget(ability.details, game);
 		return await client.mutation([
-			'lobby.respond_optional_ability',
+			'lobby.respond.optional_ability',
 			{ code, target, ability_id: ability.details.id, response: true }
 		]);
 	}
@@ -33,8 +33,8 @@
 		}
 
 		return await client.mutation([
-			'lobby.respond_optional_ability',
-			{ code, target: null, ability_id: ability.details.id, response: true }
+			'lobby.respond.optional_ability',
+			{ code, target: null, ability_id: ability.details.id, response: false }
 		]);
 	}
 
@@ -61,11 +61,8 @@
 				</AlertDialog.Title>
 				<AlertDialog.Description>
 					{ability.details.description}
-					Would you like to execute this ability for
-					{#each ability.details.mana_cost as mana}
-						<ManaBubble color={mana} />
-					{/each}
-					?
+					Would you like to execute this ability{#if ability.details.mana_cost.length > 0}
+						for {#each ability.details.mana_cost as mana}<ManaBubble color={mana} />{/each}{/if}?
 				</AlertDialog.Description>
 			</AlertDialog.Header>
 			<AlertDialog.Footer>

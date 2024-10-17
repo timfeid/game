@@ -166,49 +166,70 @@ impl CardWithDetails {
                         .and_then(|phase| Some(phase.contains(&turn_phase)))
                         .unwrap_or(true);
 
-                    if let Some(owner) = &card.owner {
-                        let can_pay_mana = { owner.lock().await.can_pay_mana(required_mana).await };
-                        let meets_mana_requirements =
-                            { owner.lock().await.has_required_mana(required_mana).await };
-                        // if can_pay_mana && within_phase {
-                        let mut meets_requirements_except_mana =
-                            within_phase && in_play && (!card.tapped || !required_tap);
-                        if let Some(game_arc) = &game_arc {
-                            if let Some(card) = &original_card_arc {
-                                meets_requirements_except_mana = meets_requirements_except_mana
-                                    && (&trigger.requirements)(
-                                        Arc::clone(game_arc),
-                                        Arc::clone(card),
-                                        trigger.id.clone(),
-                                    )
-                                    .await;
-                            }
+                    let can_pay_mana = if let Some(owner) = card.owner.as_ref() {
+                        owner.lock().await.can_pay_mana(required_mana).await
+                    } else {
+                        false
+                    };
+                    let meets_mana_requirements = if let Some(owner) = card.owner.as_ref() {
+                        owner.lock().await.has_required_mana(required_mana).await
+                    } else {
+                        false
+                    };
+                    // if can_pay_mana && within_phase {
+                    let mut meets_requirements_except_mana =
+                        within_phase && in_play && (!card.tapped || !required_tap);
+                    if let Some(game_arc) = &game_arc {
+                        if let Some(card) = &original_card_arc {
+                            meets_requirements_except_mana = meets_requirements_except_mana
+                                && (&trigger.requirements)(
+                                    Arc::clone(game_arc),
+                                    Arc::clone(card),
+                                    trigger.id.clone(),
+                                )
+                                .await;
                         }
-
-                        abilities.push(AbilityDetails {
-                            id: trigger.id.clone(),
-                            mana_cost: required_mana.clone(),
-                            required_target: trigger.card_required_target.clone(),
-                            description: description.to_string(),
-                            action_type: if *required_tap {
-                                ActionType::Tap
-                            } else {
-                                ActionType::Instant
-                            },
-                            show: meets_requirements_except_mana || required_with_phases.is_none(),
-                            meets_requirements_except_mana,
-                            meets_mana_requirements,
-                            can_pay_mana,
-                        });
-                        // return (trigger.card_required_target.clone(), action_type);
-                        // }
                     }
+
+                    abilities.push(AbilityDetails {
+                        id: trigger.id.clone(),
+                        mana_cost: required_mana.clone(),
+                        required_target: trigger.card_required_target.clone(),
+                        description: description.to_string(),
+                        action_type: if *required_tap {
+                            ActionType::Tap
+                        } else {
+                            ActionType::Instant
+                        },
+                        show: meets_requirements_except_mana || required_with_phases.is_none(),
+                        meets_requirements_except_mana,
+                        meets_mana_requirements,
+                        can_pay_mana,
+                    });
+                    // return (trigger.card_required_target.clone(), action_type);
+                    // }
                 }
                 x => {}
             }
         }
 
         abilities
+    }
+
+    pub async fn from_card(card: Card) -> CardWithDetails {
+        let frontend_target = FrontendCardTarget {
+            player_index: 0,
+            pile: FrontendPileName::Deck,
+            card_index: 0,
+        };
+        let in_play = frontend_target.pile == FrontendPileName::Play;
+        let abilities =
+            CardWithDetails::get_abilities(&card, TurnPhase::Upkeep, true, None, None).await;
+        CardWithDetails {
+            card,
+            abilities,
+            frontend_target,
+        }
     }
 
     pub async fn from_card_arc(
@@ -280,7 +301,7 @@ impl PlayerState {
                 mana_pool: ManaPool::new(),
                 health: 10,
             },
-            deck: DeckSelector::Green,
+            deck: DeckSelector::Elves,
             hand: vec![],
             discard_pile: vec![],
             status: PlayerStatus::Spectator,
@@ -397,6 +418,8 @@ pub struct Ability {
     target: CardRequiredTarget,
     description: String,
     ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+    canceled:
+        Option<Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>>,
     action_type: ActionType,
 }
 
@@ -416,6 +439,9 @@ impl Ability {
         mana_cost: Vec<ManaType>,
         target: CardRequiredTarget,
         ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+        canceled: Option<
+            Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+        >,
         description: String,
         action_type: ActionType,
     ) -> Self {
@@ -425,6 +451,7 @@ impl Ability {
             mana_cost,
             target,
             ability,
+            canceled,
             action_type,
             description,
         }
@@ -496,7 +523,8 @@ impl Game {
             .await
             .async_abilities
             .insert(ability.id.clone(), ability.clone());
-        if let Some(ref sender) = game.lock().await.broadcast_sender {
+        let sender = game.lock().await.broadcast_sender.clone();
+        if let Some(ref sender) = sender {
             let player = ability
                 .card_arc
                 .lock()
@@ -668,6 +696,30 @@ impl Game {
                 let mut game = game_arc.lock().await;
                 game.execute_ability(ability_id, target).await?;
             }
+        } else {
+            let mut game = game_arc.lock().await;
+            game.cancel_ability(ability_id).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn cancel_ability(&mut self, ability_id: String) -> Result<(), String> {
+        let ability = self
+            .async_abilities
+            .remove(&ability_id)
+            .ok_or("No ability with that id".to_string())?;
+
+        if let Some(canceled) = ability.canceled {
+            let card_arc = ability.card_arc.clone();
+            let action = (canceled)(card_arc.clone());
+            self.add_to_stack(Arc::new(CardActionWrapper {
+                card: card_arc.clone(),
+                action,
+                target: Some(EffectTarget::Card(card_arc)),
+                ability_id: Some(ability_id),
+            }));
+            self.resolve_stack().await;
         }
 
         Ok(())
@@ -807,6 +859,7 @@ impl Game {
 
     pub async fn resolve_stack(&mut self) {
         while let Some(action) = self.event_stack.pop() {
+            println!("Applying action {:?}", action);
             action.apply(self).await;
         }
 
@@ -1046,6 +1099,17 @@ impl Game {
         }
 
         Ok(Game::execute_card(game_arc, player, index, target).await?)
+    }
+
+    async fn get_card_from_frontend_position(
+        game_arc: &Arc<Mutex<Game>>,
+        position: FrontendCardTarget,
+    ) -> Arc<Mutex<Card>> {
+        game_arc
+            .lock()
+            .await
+            .card_from_frontend_target(position)
+            .await
     }
 
     async fn play_card_without_mana(
@@ -1300,12 +1364,10 @@ impl Game {
         let actions_to_execute = std::mem::take(actions);
 
         for action in actions_to_execute {
-            println!("Applying action {:?}", action);
             self.event_stack.push(action);
         }
         let actions_to_execute = self.collect_omnipresent_actions().await;
         for action in actions_to_execute {
-            println!("Applying action {:?}", action);
             self.event_stack.push(action);
         }
 

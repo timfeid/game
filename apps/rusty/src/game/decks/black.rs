@@ -150,7 +150,7 @@ pub fn create_blanchwood_armor() -> Card {
         "Enchanted creature gets +1/+1 for each Forest you control",
         vec![CardActionTrigger::new(
             ActionTriggerType::Attached,
-            CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any),
+            CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any, None),
             Arc::new(ApplyEffectToCardBasedOnTotalCardType {
                 card_type: CardType::BasicLand(ManaType::Black),
                 effects_generator: Arc::new(|target, source_card, amount_calculator| {

@@ -24,6 +24,19 @@ use crate::{http::controllers::lobby::LobbyController, lobby::lobby::LobbyData, 
 
 pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
     Router::<Ctx>::new()
+        .query("deck.list", |t| {
+            t(|ctx, code: String| async move { Ok(LobbyController::deck_list(ctx, code).await?) })
+        })
+        .query("deck.cards", |t| {
+            t(|ctx, args: SelectDeckArgs| async move {
+                Ok(LobbyController::deck_cards(ctx, args).await?)
+            })
+        })
+        .mutation("deck.select", |t| {
+            t(|ctx, args: SelectDeckArgs| async move {
+                Ok(LobbyController::deck_select(ctx, args).await?)
+            })
+        })
         .mutation("chat", |t| {
             t(|ctx, args: LobbyChatArgs| async move { Ok(LobbyController::chat(ctx, args).await?) })
         })
@@ -35,17 +48,17 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
                 Ok(LobbyController::attach_card(ctx, args).await?)
             })
         })
-        .mutation("respond_mandatory_ability", |t| {
+        .mutation("respond.mandatory_ability", |t| {
             t(|ctx, args: RespondMandatoryAbility| async move {
                 Ok(LobbyController::respond_mandatory_ability(ctx, args).await?)
             })
         })
-        .mutation("respond_optional_ability", |t| {
+        .mutation("respond.optional_ability", |t| {
             t(|ctx, args: RespondOptionalAbility| async move {
                 Ok(LobbyController::respond_optional_ability(ctx, args).await?)
             })
         })
-        .mutation("respond_card_selection", |t| {
+        .mutation("respond.card_selection", |t| {
             t(|ctx, args: RespondCardSelection| async move {
                 Ok(LobbyController::respond_card_selection(ctx, args).await?)
             })
@@ -64,11 +77,6 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         })
         .mutation("join", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::join(ctx, code).await?) })
-        })
-        .mutation("select_deck", |t| {
-            t(|ctx, args: SelectDeckArgs| async move {
-                Ok(LobbyController::select_deck(ctx, args).await?)
-            })
         })
         .mutation("ready", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::ready(ctx, code).await?) })

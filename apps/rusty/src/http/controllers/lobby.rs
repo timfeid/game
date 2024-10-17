@@ -11,7 +11,7 @@ use crate::{
     error::{AppError, AppResult},
     game::FrontendTarget,
     lobby::{
-        lobby::{DeckSelector, Lobby, LobbyChat, LobbyData},
+        lobby::{DeckDetails, DeckSelector, Lobby, LobbyChat, LobbyData},
         manager::{LobbyCommand, LobbyManager},
     },
     services::jwt::{Claims, JwtService},
@@ -91,7 +91,34 @@ fn personalize_lobby_data_for_player(command: &mut LobbyCommand, user_id: &str) 
 
 pub struct LobbyController {}
 impl LobbyController {
-    pub async fn select_deck(ctx: Ctx, args: SelectDeckArgs) -> AppResult<()> {
+    pub async fn deck_cards(ctx: Ctx, args: SelectDeckArgs) -> AppResult<DeckDetails> {
+        let user = ctx.required_user()?;
+
+        // Step 1: Get the lobby instance from the lobby manager and release the lock
+        let l = Arc::clone(&ctx.lobby_manager);
+        let lobby = l
+            .get_lobby(&args.code)
+            .await
+            .map_err(|_| AppError::BadRequest("No such lobby".to_string()))?;
+
+        let response = lobby.lock().await.get_deck_info(args.deck).await;
+        Ok(response)
+    }
+    pub async fn deck_list(ctx: Ctx, code: String) -> AppResult<Vec<DeckSelector>> {
+        let user = ctx.required_user()?;
+
+        // Step 1: Get the lobby instance from the lobby manager and release the lock
+        let l = Arc::clone(&ctx.lobby_manager);
+        let lobby = l
+            .get_lobby(&code)
+            .await
+            .map_err(|_| AppError::BadRequest("No such lobby".to_string()))?;
+
+        let response = lobby.lock().await.list_desks(user).await;
+        Ok(response)
+    }
+
+    pub async fn deck_select(ctx: Ctx, args: SelectDeckArgs) -> AppResult<()> {
         let code = args.code;
         let deck = args.deck;
         let user = ctx.required_user()?;
@@ -109,7 +136,9 @@ impl LobbyController {
 
         Ok(())
     }
+}
 
+impl LobbyController {
     pub async fn ready(ctx: Ctx, code: String) -> AppResult<()> {
         let user = ctx.required_user()?;
 
@@ -227,6 +256,11 @@ impl LobbyController {
             if let Ok(mut post_stream) = manager.subscribe_to_lobby_updates(join_code, access_token).await {
                 while let Some(mut lobby_data) = post_stream.next().await {
                         match &lobby_data {
+                            LobbyCommand::ChooseFromSelection(ability_details) => {
+                                if ability_details.player_id == user_claims.sub.clone() {
+                                    yield lobby_data;
+                                }
+                            },
                             LobbyCommand::MandatoryExecuteAbility(ability_details) => {
                                 if ability_details.player_id == user_claims.sub.clone() {
                                     yield lobby_data;

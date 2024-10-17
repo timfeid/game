@@ -953,10 +953,14 @@ impl Player {
     pub async fn can_play(&self, card: &Arc<Mutex<Card>>, is_my_turn: bool) -> bool {
         let card = card.lock().await;
 
-        if let CardType::BasicLand(mana) = card.card_type {
-            self.mana_pool.played_card == false && is_my_turn
-        } else {
-            true
+        match card.card_type {
+            CardType::BasicLand(mana_type) => self.mana_pool.played_card == false && is_my_turn,
+            CardType::AdvancedLand(mana_type) => self.mana_pool.played_card == false && is_my_turn,
+            CardType::AdvancedMultiLand(mana_type, mana_type1) => {
+                self.mana_pool.played_card == false && is_my_turn
+            }
+            // TODO - others..
+            _ => true,
         }
     }
 

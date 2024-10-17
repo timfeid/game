@@ -46,6 +46,8 @@ pub enum CardType {
     Sorcery,
     Artifact,
     BasicLand(ManaType),
+    AdvancedLand(ManaType),
+    AdvancedMultiLand(ManaType, ManaType),
     // Land(Vec<ManaType>),
 }
 

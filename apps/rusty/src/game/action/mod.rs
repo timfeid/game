@@ -13,6 +13,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use ulid::Ulid;
+use uuid::Uuid;
 
 use super::{
     card::{Card, CardType, CreatureType},
@@ -237,9 +238,20 @@ impl Action for PlayCardAction {
             // Handle special cases, e.g., if the card is a land
             {
                 let card_lock = self.card_arc.lock().await;
-                if let CardType::BasicLand(_) = card_lock.card_type {
-                    let mut player = self.player_arc.lock().await;
-                    player.mana_pool.played_card = true;
+                match card_lock.card_type {
+                    CardType::AdvancedMultiLand(_, _) => {
+                        let mut player = self.player_arc.lock().await;
+                        player.mana_pool.played_card = true;
+                    }
+                    CardType::AdvancedLand(_) => {
+                        let mut player = self.player_arc.lock().await;
+                        player.mana_pool.played_card = true;
+                    }
+                    CardType::BasicLand(_) => {
+                        let mut player = self.player_arc.lock().await;
+                        player.mana_pool.played_card = true;
+                    }
+                    _ => (),
                 }
             }
         }
@@ -585,11 +597,12 @@ pub enum CardRequiredTarget {
     EnemyCard,
     EnemyPlayer,
     EnemyCardOrPlayer,
-    CardOfType(CardType, CardTargetTeam),
+    CardOfType(CardType, CardTargetTeam, Option<bool>),
     CreatureOfType(CreatureType, CardTargetTeam, Option<bool>),
     EnemyCardInCombat,
     Spell,
     MultipleCardsOfType(CardType, i8),
+    CreatureWithPowerAndToughness(i8, i8, CardTargetTeam),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -1453,11 +1466,30 @@ impl CardAction for ApplyEffectToPlayerCardType {
 }
 
 pub struct ApplyEffectToTargetAction {
-    pub effect_generator: Arc<
-        dyn Fn(EffectTarget, Option<Arc<Mutex<Card>>>) -> Arc<Mutex<dyn Effect + Send + Sync>>
+    pub effects_generator: Arc<
+        dyn Fn(
+                EffectTarget,
+                Arc<Mutex<Card>>,
+            )
+                -> Pin<Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>>
             + Send
             + Sync,
     >,
+}
+impl ApplyEffectToTargetAction {
+    pub fn new(
+        effects_generator: Arc<
+            dyn Fn(
+                    EffectTarget,
+                    Arc<Mutex<Card>>,
+                ) -> Pin<
+                    Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                > + Send
+                + Sync,
+        >,
+    ) -> Self {
+        ApplyEffectToTargetAction { effects_generator }
+    }
 }
 
 impl Debug for ApplyEffectToTargetAction {
@@ -1484,15 +1516,38 @@ impl CardAction for ApplyEffectToTargetAction {
         }; // Lock is released here
 
         if let Some(target) = target {
-            let source_card = Some(Arc::clone(&card_arc)); // Set the source card
-            let effect = (self.effect_generator)(target.clone(), source_card);
-            let effect_id = effect.lock().await.get_final_id();
-            println!("Adding effect {:?} to card {:?}", effect, target);
+            let source_card = Arc::clone(&card_arc);
+            let effects = (self.effects_generator)(target.clone(), source_card).await;
+            for effect in effects {
+                let effect_id = effect.lock().await.get_final_id();
+                println!("Adding effect {:?} to card {:?}", effect, target);
 
-            game.effect_manager.add_effect(effect_id, effect);
+                game.effect_manager.add_effect(effect_id, effect);
+            }
         } else {
             println!("No target specified for card action.");
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct TapCardAction {}
+
+#[async_trait::async_trait]
+impl CardAction for TapCardAction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    async fn apply(
+        &self,
+        game: &mut Game,
+        card_arc: Arc<Mutex<Card>>,
+        target: EffectTarget,
+        ability_id: Option<String>,
+    ) {
+        println!("tapping card {:?} OR \n\n {:?}", card_arc, target);
+        let mut card = card_arc.lock().await;
+        card.tapped = true;
     }
 }
 
@@ -1617,6 +1672,7 @@ impl CardAction for CastMandatoryAdditionalAbility {
                         self.mana.clone(),
                         self.target.clone(),
                         self.ability.clone(),
+                        None,
                         self.description.clone(),
                         self.action_type.clone(),
                     ),
@@ -1639,12 +1695,36 @@ pub struct CastOptionalAdditionalAbility {
     pub mana: Vec<ManaType>,
     pub target: CardRequiredTarget,
     pub ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+    pub canceled: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
     pub description: String,
     pub action_type: ActionType,
 }
 impl Debug for CastOptionalAdditionalAbility {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CastOptionalAdditionalAbility").finish()
+    }
+}
+
+impl CastOptionalAdditionalAbility {
+    pub fn new(
+        mana: Vec<ManaType>,
+        target: CardRequiredTarget,
+        ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+        description: String,
+        action_type: ActionType,
+    ) -> CastOptionalAdditionalAbility {
+        let canceled = Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
+            Arc::new(DrawCardCardAction::one(CardActionTarget::SelfOwner))
+                as Arc<dyn CardAction + Send + Sync>
+        });
+        CastOptionalAdditionalAbility {
+            mana,
+            target,
+            ability,
+            description,
+            action_type,
+            canceled,
+        }
     }
 }
 
@@ -1663,6 +1743,7 @@ impl CardAction for CastOptionalAdditionalAbility {
         let owner = card_arc.lock().await.owner.clone();
 
         if let Some(owner_arc) = owner {
+            println!("getting owner? {:?}", owner_arc);
             let can_pay_mana_cost = { owner_arc.lock().await.can_pay_mana(&self.mana).await };
             if can_pay_mana_cost {
                 let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
@@ -1674,6 +1755,7 @@ impl CardAction for CastOptionalAdditionalAbility {
                         self.mana.clone(),
                         self.target.clone(),
                         self.ability.clone(),
+                        Some(self.canceled.clone()),
                         self.description.clone(),
                         self.action_type.clone(),
                     ),

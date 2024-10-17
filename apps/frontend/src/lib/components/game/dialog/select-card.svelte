@@ -43,7 +43,7 @@
 			return;
 		}
 		const target = cards.cards[index].frontend_target;
-		await client.mutation(['lobby.respond_card_selection', { code, target: { Card: target } }]);
+		await client.mutation(['lobby.respond.card_selection', { code, target: { Card: target } }]);
 		open = false;
 	}
 
