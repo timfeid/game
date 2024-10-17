@@ -489,7 +489,8 @@ impl Game {
             .await
             .async_abilities
             .insert(ability.id.clone(), ability.clone());
-        if let Some(ref sender) = game.lock().await.broadcast_sender {
+        let sender = game.lock().await.broadcast_sender.clone();
+        if let Some(ref sender) = sender {
             let player = ability
                 .card_arc
                 .lock()
@@ -746,6 +747,51 @@ impl Game {
         self.resolve_stack().await;
 
         Ok(())
+    }
+
+    pub async fn remove_from_frontend_target(
+        &self,
+        target: FrontendCardTarget,
+    ) -> Arc<Mutex<Card>> {
+        match target.pile {
+            crate::game::FrontendPileName::Deck => {
+                let player = Arc::clone(&self.players[target.player_index as usize]);
+                let card = player
+                    .lock()
+                    .await
+                    .deck
+                    .draw_pile
+                    .remove(target.card_index as usize);
+                Arc::clone(&card)
+            }
+            crate::game::FrontendPileName::Hand => {
+                let player = Arc::clone(&self.players[target.player_index as usize]);
+                let card = &player
+                    .lock()
+                    .await
+                    .cards_in_hand
+                    .remove(target.card_index as usize);
+                Arc::clone(&card)
+            }
+            crate::game::FrontendPileName::Play => {
+                let player = Arc::clone(&self.players[target.player_index as usize]);
+                let card = &player
+                    .lock()
+                    .await
+                    .cards_in_play
+                    .remove(target.card_index as usize);
+                Arc::clone(&card)
+            }
+            crate::game::FrontendPileName::Spell => {
+                let player = Arc::clone(&self.players[target.player_index as usize]);
+                let card = &player
+                    .lock()
+                    .await
+                    .spells
+                    .remove(target.card_index as usize);
+                Arc::clone(&card)
+            }
+        }
     }
 
     pub async fn card_from_frontend_target(&self, target: FrontendCardTarget) -> Arc<Mutex<Card>> {
@@ -1116,7 +1162,11 @@ impl Game {
         game_arc: &Arc<Mutex<Game>>,
         card: FrontendCardTarget,
     ) -> Result<Arc<Mutex<Card>>, String> {
-        let card = game_arc.lock().await.card_from_frontend_target(card).await;
+        let card = game_arc
+            .lock()
+            .await
+            .remove_from_frontend_target(card)
+            .await;
         let game = Arc::clone(game_arc);
         let player = card.lock().await.owner.clone().unwrap();
         // let card = player.lock().await.deck.draw_pile[index].clone();

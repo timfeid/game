@@ -18,12 +18,14 @@
 	import Lobby from './Lobby.svelte';
 	import { askOptionalAbility, mandatoryAbility, selectFromCards } from '../../stores/dialog';
 
+	export let code: string;
+
 	let lobby: LobbyData | undefined;
 	let unsubscribe: (() => void) | undefined;
 	let turnMessage: LobbyTurnMessage | undefined;
 
-	if (browser && $accessToken) {
-		reset($accessToken);
+	if (browser && $accessToken && code) {
+		reset(code, $accessToken);
 	}
 
 	function isMandatoryExecuteAbility(
@@ -72,51 +74,47 @@
 		selectFromCards.set(details);
 	}
 
-	async function reset(accessToken: string) {
+	async function reset(code: string, accessToken: string) {
 		if (unsubscribe) {
 			unsubscribe();
 		}
-		unsubscribe = websocketClient.addSubscription(
-			['lobby.subscribe', [$page.params.slug, accessToken]],
-			{
-				onData(data) {
-					// console.log(data);
-					if (isUpdated(data)) {
-						return updated(data.Updated);
-					}
-					if (isAskExecuteAbility(data)) {
-						return askExecuteAbility(data.AskExecuteAbility);
-					}
-					if (isMandatoryExecuteAbility(data)) {
-						return askMandatoryAbility(data.MandatoryExecuteAbility);
-					}
-
-					if (isTurnMessages(data)) {
-						return turnMessageReceived(data.TurnMessages);
-					}
-
-					if (isCardSelection(data)) {
-						return cardSelection(data.ChooseFromSelection);
-						console.log(data);
-					}
-				},
-				onStarted() {
-					console.log('started.');
-				},
-				onError(e) {
-					console.log('error when streaming');
-					console.error(e);
+		unsubscribe = websocketClient.addSubscription(['lobby.subscribe', [code, accessToken]], {
+			onData(data) {
+				// console.log(data);
+				if (isUpdated(data)) {
+					return updated(data.Updated);
 				}
+				if (isAskExecuteAbility(data)) {
+					return askExecuteAbility(data.AskExecuteAbility);
+				}
+				if (isMandatoryExecuteAbility(data)) {
+					return askMandatoryAbility(data.MandatoryExecuteAbility);
+				}
+
+				if (isTurnMessages(data)) {
+					return turnMessageReceived(data.TurnMessages);
+				}
+
+				if (isCardSelection(data)) {
+					return cardSelection(data.ChooseFromSelection);
+					console.log(data);
+				}
+			},
+			onStarted() {
+				console.log('started.');
+			},
+			onError(e) {
+				console.log('error when streaming');
+				console.error(e);
 			}
-		);
+		});
 
-		await join();
+		await join(code);
 	}
-	export let code: string;
 
-	async function join() {
+	async function join(code: string) {
 		try {
-			await client.mutation(['lobby.join', $page.params.slug]);
+			await client.mutation(['lobby.join', code]);
 		} catch (e) {
 			console.error(e);
 			toast.error('Something went wrong');

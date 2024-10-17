@@ -1,23 +1,20 @@
 <script lang="ts">
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import ManaBubble from '../mana-bubble.svelte';
-	import { askOptionalAbility, mandatoryAbility } from '../../../stores/dialog';
-	import { onMount } from 'svelte';
 	import type { ExecuteAbility, GameState } from '@gangsta/rusty';
+	import { onMount } from 'svelte';
 	import { client } from '../../../client';
+	import { mandatoryAbility } from '../../../stores/dialog';
 	import { waitForTarget } from '../game';
+	import * as AlertDialog from '../../ui/alert-dialog';
+	import ManaBubble from '../mana-bubble.svelte';
 
 	let ability: ExecuteAbility | undefined = undefined;
 	export let game: GameState;
 	export let code: string;
 
 	async function yes() {
-		open = false;
 		if (!ability) {
 			return;
 		}
-		console.log(ability);
 
 		const target = await waitForTarget(ability.details, game);
 		return await client.mutation([
@@ -29,19 +26,20 @@
 	onMount(() => {
 		return mandatoryAbility.subscribe((incoming) => {
 			if (incoming) {
+				ability = incoming;
 				open = true;
 			}
-			ability = incoming;
 		});
 	});
 	let open = false;
+
+	$: if (!open) {
+		mandatoryAbility.set(undefined);
+	}
 </script>
 
 {#if ability}
 	<AlertDialog.Root bind:open>
-		<AlertDialog.Trigger asChild let:builder>
-			<Button builders={[builder]} variant="outline">Show Dialog</Button>
-		</AlertDialog.Trigger>
 		<AlertDialog.Content>
 			<AlertDialog.Header>
 				<AlertDialog.Title>
@@ -49,11 +47,6 @@
 				</AlertDialog.Title>
 				<AlertDialog.Description>
 					{ability.details.description}
-					Would you like to execute this ability for
-					{#each ability.details.mana_cost as mana}
-						<ManaBubble color={mana} />
-					{/each}
-					?
 				</AlertDialog.Description>
 			</AlertDialog.Header>
 			<AlertDialog.Footer>

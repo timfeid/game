@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { selectedAbility, selectFromAbilities } from '../../../stores/dialog';
 	import Ability from '../card/ability.svelte';
+	import AlertDialogDescription from '../../ui/alert-dialog/alert-dialog-description.svelte';
 
 	let abilities: AbilityDetails[] | undefined;
 	export let game: GameState;
@@ -27,24 +28,29 @@
 		selectedAbility.set(ability);
 		open = false;
 	}
+	$: if (!open) {
+		selectFromAbilities.set(undefined);
+	}
 
 	let open = true;
 </script>
 
 {#if abilities}
 	<AlertDialog.Root bind:open>
-		<AlertDialog.Trigger asChild let:builder>
-			<Button builders={[builder]} variant="outline">Show Dialog</Button>
-		</AlertDialog.Trigger>
 		<AlertDialog.Content>
 			<AlertDialog.Header>
 				<AlertDialog.Title>Choose an ability</AlertDialog.Title>
-				<ul class="border rounded">
+				<ul class="">
 					{#each abilities as ability}
-						<li class="border-b px-2 last:border-b-0 py-2">
-							<button on:click={() => selectAbility(ability)}>
+						<li class="border-b px-1 last:border-b-0 py-1">
+							<Button
+								type="button"
+								variant="ghost"
+								class="w-full justify-start text-left whitespace-normal h-auto"
+								on:click={() => selectAbility(ability)}
+							>
 								<Ability noTooltips {ability}></Ability>
-							</button>
+							</Button>
 						</li>
 					{/each}
 				</ul>

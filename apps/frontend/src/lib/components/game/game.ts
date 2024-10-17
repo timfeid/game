@@ -6,7 +6,8 @@ import type {
 	CreatureType,
 	FrontendCardTarget,
 	FrontendTarget,
-	GameState
+	GameState,
+	StatManager
 } from '@gangsta/rusty';
 import { tick } from 'svelte';
 import { toast } from 'svelte-sonner';
@@ -14,6 +15,20 @@ import { writable } from 'svelte/store';
 
 export const target = writable<FrontendTarget | null>();
 export const searchingForTarget = writable(false);
+
+function extractDamageAndDefense(stats: StatManager) {
+	let power = 0;
+	let toughness = 0;
+	for (const stat of Object.values(stats.stats)) {
+		if (stat.stat_type === 'Power') {
+			power += stat.intensity;
+		} else if (stat.stat_type === 'Toughness') {
+			toughness += stat.intensity;
+		}
+	}
+
+	return { power, toughness };
+}
 
 function isPlayer(frontendTarget: FrontendTarget | null): frontendTarget is { Player: number } {
 	if (!frontendTarget) {
@@ -31,9 +46,15 @@ function isCard(
 	return 'Card' in frontendTarget;
 }
 
+function isCreatureWithPowerAndToughness(
+	target: CardRequiredTarget
+): target is { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] } {
+	return typeof target === 'object' && 'CreatureWithPowerAndToughness' in target;
+}
+
 function isCardOfType(
 	target: CardRequiredTarget
-): target is { CardOfType: [CardType, CardTargetTeam] } {
+): target is { CardOfType: [CardType, CardTargetTeam, boolean | null] } {
 	return typeof target === 'object' && 'CardOfType' in target;
 }
 
@@ -91,6 +112,21 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 				if (pile) {
 					const ccard = pile[frontendTarget.Card.card_index];
 					console.log('pile', pile, ccard);
+					if (isCreatureWithPowerAndToughness(ability.required_target)) {
+						const [power, toughness, team] = ability.required_target.CreatureWithPowerAndToughness;
+						// if (team)
+						// TODO: check the team, too
+						const { power: cardPower, toughness: cardToughness } = extractDamageAndDefense(
+							ccard.card.stats
+						);
+						if (
+							ccard.card.card_type === 'Creature' &&
+							power === cardPower &&
+							toughness === cardToughness
+						) {
+							return resolve(frontendTarget);
+						}
+					}
 					if (isCreatureTypeCardRequirement(ability.required_target)) {
 						const [type] = ability.required_target.CreatureOfType;
 						// if (team)

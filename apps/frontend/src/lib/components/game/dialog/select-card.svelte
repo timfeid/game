@@ -52,9 +52,6 @@
 
 {#if cards}
 	<AlertDialog.Root bind:open>
-		<AlertDialog.Trigger asChild let:builder>
-			<Button builders={[builder]} variant="outline">Show Dialog</Button>
-		</AlertDialog.Trigger>
 		<AlertDialog.Content>
 			<AlertDialog.Header>
 				<AlertDialog.Title>Choose a card</AlertDialog.Title>

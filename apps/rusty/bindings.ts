@@ -32,10 +32,6 @@ export type ManaType = "White" | "Blue" | "Black" | "Red" | "Green" | "Colorless
 
 export type TurnPhase = "Untap" | "Upkeep" | "Draw" | "Main" | "BeginningOfCombat" | "DeclareAttackers" | "DeclareBlockers" | "CombatDamage" | "EndOfCombat" | "Main2" | "End" | "Cleanup"
 
-export type Card = { creature_type: CreatureType | null; name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; stats: StatManager; cost: ManaType[]; is_countered: boolean; id: string; counters: { [key: string]: Counter } }
-
-export type Counter = { PowerToughnessModifier: [number, number] }
-
 export type CardTargetTeam = "Owner" | "Opponent" | "Any"
 
 export type PlayerStatus = "Spectator" | "Ready" | "InGame"
@@ -48,11 +44,13 @@ export type SelectDeckArgs = { code: string; deck: DeckSelector }
 
 export type LobbyTurnMessage = { messages: string[] }
 
+export type CardPhase = { Charging: number } | "Ready" | "Complete" | "Cancelled"
+
 export type CardSelectionDetails = { player_id: string; cards: CardWithDetails[]; valid_card_indexes: number[] }
 
 export type FrontendPileName = "Hand" | "Play" | "Spell" | "Deck"
 
-export type CardPhase = { Charging: number } | "Ready" | "Complete" | "Cancelled"
+export type Counter = { PowerToughnessModifier: [number, number] }
 
 export type DeckDetails = { cards: CardWithCount[] }
 
@@ -103,6 +101,8 @@ export type Stat = { stat_type: StatType; intensity: number }
 export type DeckSelector = "Elves" | "Elves2" | "Blue" | "Black" | "Angels" | "Red"
 
 export type CardWithDetails = { card: Card; abilities: AbilityDetails[]; frontend_target: FrontendCardTarget }
+
+export type Card = { creature_type: CreatureType | null; name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; stats: StatManager; cost: ManaType[]; is_countered: boolean; id: string; counters: { [key: string]: Counter } }
 
 export type FrontendCardTarget = { player_index: number; pile: FrontendPileName; card_index: number }
 

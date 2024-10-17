@@ -55,6 +55,8 @@ impl CardType {
     pub fn is_spell(&self) -> bool {
         match self {
             CardType::BasicLand(_) => false,
+            CardType::AdvancedLand(_) => false,
+            CardType::AdvancedMultiLand(_, _) => false,
             // CardType::Land(_) => false,
             _ => true,
         }
@@ -458,6 +460,18 @@ impl Card {
         }
 
         formatted_mana.trim_end().to_string()
+    }
+
+    pub fn is_tappable(&self) -> bool {
+        if self.current_phase != CardPhase::Ready {
+            return false;
+        }
+
+        if self.tapped {
+            return false;
+        }
+
+        return true;
     }
 
     pub fn tap(&mut self) -> Result<(), &str> {

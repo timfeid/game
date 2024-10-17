@@ -5,7 +5,7 @@
 
 	async function createGame() {
 		const response = await client.mutation(['lobby.create', []]);
-		goto(`/game/${response.join_code}`);
+		goto(`/game?code=${response.join_code}`);
 	}
 </script>
 

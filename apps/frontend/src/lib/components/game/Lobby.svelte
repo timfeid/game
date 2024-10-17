@@ -25,9 +25,6 @@
 
 	$: if (game_state && browser && decks.length == 0) {
 		client.query(['lobby.deck.list', join_code]).then((v) => (decks = v));
-	}
-
-	$: if (game_state && browser && deck) {
 		client.query(['lobby.deck.cards', { deck, code: join_code }]).then((v) => (deckDetails = v));
 	}
 
@@ -42,14 +39,25 @@
 
 	async function setDeck(deck: DeckSelector) {
 		await client.mutation(['lobby.deck.select', { deck, code: join_code }]);
+		client.query(['lobby.deck.cards', { deck, code: join_code }]).then((v) => (deckDetails = v));
 	}
 </script>
 
 <div class="container !px-3">
 	<div class="flex items-center h-24">
 		<Button on:click={ready}>Ready up</Button>
+		<div class="ml-auto flex space-x-2">
+			{#each Object.keys(game_state.players) as player}
+				<div>
+					{#if player !== $user?.sub}
+						{player}: {game_state.players[player].deck}
+					{/if}
+				</div>
+			{/each}
+		</div>
 	</div>
-	{#if self.status === 'Spectator'}
+	{#if self.status === 'Spectator' || self.status === 'Ready'}
+		{self.status}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger asChild let:builder>
 				<Button builders={[builder]} variant="outline" class="w-full flex justify-between">

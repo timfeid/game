@@ -33,6 +33,46 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
+fn create_test_forest() -> Card {
+    Card::new(
+        "Forest",
+        "",
+        vec![CardActionTrigger::new(
+            ActionTriggerType::AbilityWithinPhases(
+                "Add 1 {G} to your pool".to_string(),
+                vec![],
+                None,
+                true,
+            ),
+            CardRequiredTarget::None,
+            Arc::new(GenerateManaAction {
+                mana_to_add: vec![
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                ],
+                target: PlayerActionTarget::Owner,
+            }),
+        )],
+        CardPhase::Ready,
+        CardType::BasicLand(ManaType::Green),
+        vec![],
+        vec![],
+    )
+}
+
 fn create_forest() -> Card {
     Card::new(
         "Forest",
@@ -489,11 +529,14 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                             let player_id = owner.lock().await.name.clone();
                                                             let deck = owner.lock().await.deck.draw_pile.clone();
                                                             let hand = owner.lock().await.cards_in_hand.clone();
-                                                            cards.push(CardWithDetails::from_card_arc(Arc::clone(&deck[0]), &game).await);
-                                                            valid_card_indexes.push(0);
                                                             for (index, card) in hand.iter().enumerate() {
                                                                 cards.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
-                                                                valid_card_indexes.push((index+1) as i32)
+                                                                valid_card_indexes.push(index as i32)
+                                                            }
+                                                            if deck.len() > 0 {
+
+                                                                cards.push(CardWithDetails::from_card_arc(Arc::clone(&deck[0]), &game).await);
+                                                                valid_card_indexes.push((cards.len() -1) as i32)
                                                             }
 
                                                             game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
@@ -557,17 +600,10 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                 > {
                                                     Box::pin(async move {
                                                         if let Ok(card) = card_arc.try_lock() {
-                                                            println!("checking card");
-                                                            card.current_phase == CardPhase::Ready
-                                                                && !card.tapped
-                                                                && card.creature_type
-                                                                    == Some(CreatureType::Elf)
-                                                        } else {
-                                                            println!(
-                                                                "unable to lock card!!!!!!!!!!!!!"
-                                                            );
-                                                            false
+                                                            return card.is_tappable() && card.card_type == CardType::Creature;
                                                         }
+
+                                                        false
                                                     })
                                                 },
                                             ))
@@ -810,17 +846,10 @@ pub fn create_heritage_druid() -> Card {
                                                 > {
                                                     Box::pin(async move {
                                                         if let Ok(card) = card_arc.try_lock() {
-                                                            println!("checking card");
-                                                            card.current_phase == CardPhase::Ready
-                                                                && !card.tapped
-                                                                && card.creature_type
-                                                                    == Some(CreatureType::Elf)
-                                                        } else {
-                                                            println!(
-                                                                "unable to lock card!!!!!!!!!!!!!"
-                                                            );
-                                                            false
+                                                            return card.is_tappable() && card.creature_type == Some(CreatureType::Elf)
                                                         }
+
+                                                        false
                                                     })
                                                 },
                                             ))
@@ -1064,13 +1093,14 @@ pub fn create_pendelhaven() -> Card {
                 CardRequiredTarget::CreatureWithPowerAndToughness(1, 1, CardTargetTeam::Any),
                 Arc::new(ApplyEffectToTargetAction::new(Arc::new(
                     |target, source_card| {
+                        println!("target {:?}\n\nsource {:?}", target, source_card);
                         Box::pin(async move {
                             vec![
                                 Arc::new(Mutex::new(StatModifierEffect::new(
                                     target.clone(),
                                     StatType::Power,
                                     1,
-                                    ExpireContract::Never,
+                                    ExpireContract::Turns(1),
                                     Some(source_card.clone()),
                                 )))
                                     as Arc<Mutex<dyn Effect + Send + Sync>>,
@@ -1078,7 +1108,7 @@ pub fn create_pendelhaven() -> Card {
                                     target,
                                     StatType::Toughness,
                                     2,
-                                    ExpireContract::Never,
+                                    ExpireContract::Turns(1),
                                     Some(source_card.clone()),
                                 ))),
                             ]
@@ -1376,8 +1406,11 @@ pub fn create_green_deck_v2() -> Vec<Card> {
     deck.append(&mut duplicate_card(create_cavern_of_souls(), 3));
     deck.append(&mut duplicate_card(create_temple_garden(), 3));
     deck.append(&mut duplicate_card(create_pendelhaven(), 2));
-
     deck.append(&mut duplicate_card(create_forest(), 15));
+
+    // deck.append(&mut duplicate_card(create_test_forest(), 1));
+    // deck.append(&mut duplicate_card(create_pendelhaven(), 1));
+    // deck.append(&mut duplicate_card(create_llanowar_elves(), 1));
 
     deck
 }

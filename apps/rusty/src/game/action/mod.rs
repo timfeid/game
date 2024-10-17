@@ -1510,22 +1510,13 @@ impl CardAction for ApplyEffectToTargetAction {
         target: EffectTarget,
         ability_id: Option<String>,
     ) {
-        let target = {
-            let card = card_arc.lock().await;
-            card.target.clone()
-        }; // Lock is released here
+        let source_card = Arc::clone(&card_arc);
+        let effects = (self.effects_generator)(target.clone(), source_card).await;
+        for effect in effects {
+            let effect_id = effect.lock().await.get_final_id();
+            println!("Adding effect {:?} to card {:?}", effect, target);
 
-        if let Some(target) = target {
-            let source_card = Arc::clone(&card_arc);
-            let effects = (self.effects_generator)(target.clone(), source_card).await;
-            for effect in effects {
-                let effect_id = effect.lock().await.get_final_id();
-                println!("Adding effect {:?} to card {:?}", effect, target);
-
-                game.effect_manager.add_effect(effect_id, effect);
-            }
-        } else {
-            println!("No target specified for card action.");
+            game.effect_manager.add_effect(effect_id, effect);
         }
     }
 }
