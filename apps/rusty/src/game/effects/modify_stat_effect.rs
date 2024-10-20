@@ -23,7 +23,7 @@ pub enum CardActionTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModifyStatAction {
     pub stat: StatType,
-    pub amount: i8,
+    pub amount: i16,
     pub target: CardActionTarget,
     pub phases: Option<Vec<TurnPhase>>, // Optional phases: None means the action can be fired manually
 }

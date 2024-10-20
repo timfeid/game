@@ -61,6 +61,7 @@ pub struct AbilityDetails {
     pub meets_requirements_except_mana: bool,
     pub meets_mana_requirements: bool,
     pub can_pay_mana: bool,
+    pub owner_player_id: Option<String>,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -95,6 +96,7 @@ impl ExecuteAbility {
                 meets_requirements_except_mana,
                 meets_mana_requirements,
                 can_pay_mana,
+                owner_player_id: Some(player_id.clone()),
             },
             player_id,
         }
@@ -286,8 +288,8 @@ impl LobbyManager {
                 .lock()
                 .await
                 .attach_card(
-                    args.player_index as usize,
-                    args.in_play_index as usize,
+                    args.card.player_index as usize,
+                    args.card.card_index as usize,
                     target,
                 )
                 .await?;
@@ -310,14 +312,8 @@ impl LobbyManager {
             lobby
                 .lock()
                 .await
-                .action_card(
-                    args.player_index as usize,
-                    args.in_play_index as usize,
-                    target,
-                    args.trigger_id,
-                )
+                .action_card(args.card, target, args.trigger_id)
                 .await?;
-            println!("actioned card, notifying lobby");
         }
         // lobby.lock().await.message(user, args.text);
         self.notify_lobby(&lobby_id).await.ok();
@@ -353,7 +349,6 @@ impl LobbyManager {
                 .await
                 .respond_card_selection(player, target)
                 .await?;
-            println!("actioned card, notifying lobby");
         }
         // lobby.lock().await.message(user, args.text);
         self.notify_lobby(&lobby_id).await.ok();
@@ -389,7 +384,6 @@ impl LobbyManager {
                 .await
                 .respond_mandatory_player_ability(args.ability_id, player, target)
                 .await?;
-            println!("actioned card, notifying lobby");
         }
         // lobby.lock().await.message(user, args.text);
         self.notify_lobby(&lobby_id).await.ok();
@@ -425,7 +419,6 @@ impl LobbyManager {
                 .await
                 .respond_optional_player_ability(args.ability_id, player, target, args.response)
                 .await?;
-            println!("actioned card, notifying lobby");
         }
         // lobby.lock().await.message(user, args.text);
         self.notify_lobby(&lobby_id).await.ok();

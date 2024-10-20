@@ -54,12 +54,7 @@ pub fn create_vengful_spirit() -> Card {
         3, // Damage
         2, // Defense
         [ManaType::Black],
-        [StatType::Lifelink],
-        CardActionTrigger::new(
-            ActionTriggerType::PhaseStarted(vec![TurnPhase::CombatDamage], TriggerTarget::Owner),
-            CardRequiredTarget::None,
-            Arc::new(LifeLinkAction {})
-        )
+        [StatType::Lifelink]
     )
 }
 
@@ -77,7 +72,7 @@ pub fn create_hydra() -> Card {
             CardRequiredTarget::None,
             Arc::new(ApplyDynamicEffectToCard::new(
                 Arc::new(
-                    move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i8> + Send>> {
+                    move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i16> + Send>> {
                         Box::pin(async move {
                             let owner = {
                                 let card = card_arc.lock().await;
@@ -86,7 +81,7 @@ pub fn create_hydra() -> Card {
 
                             if let Some(owner_arc) = owner {
                                 let owner = owner_arc.lock().await;
-                                owner.mana_pool.total() as i8
+                                owner.mana_pool.total() as i16
                             } else {
                                 0
                             }

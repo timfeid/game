@@ -24,6 +24,7 @@ pub enum ModifyStatTarget {
 pub enum EffectTarget {
     Player(Arc<Mutex<Player>>),
     Card(Arc<Mutex<Card>>),
+    CardId(String),
 }
 
 // Define a unique identifier for each effect
@@ -168,15 +169,100 @@ impl fmt::Debug for EffectManager {
 
 #[derive(Debug)]
 pub enum ExpireContract {
-    Turns(i8),
+    Turns(i16),
     Never,
+}
+
+#[derive(Debug)]
+pub struct ExileCardEffect {
+    pub target: EffectTarget,
+    pub expires: ExpireContract, // None for permanent effects
+    pub id: EffectID,
+    pub applied: bool,
+    pub source_card: Option<Arc<Mutex<Card>>>,
+    pub previous_turn: Option<i32>,
+    pub game: Arc<Mutex<Game>>,
+    pub target_id: Option<String>,
+}
+
+impl ExileCardEffect {
+    pub fn new(
+        target: EffectTarget,
+        expires: ExpireContract,
+        source_card: Option<Arc<Mutex<Card>>>,
+        game: Arc<Mutex<Game>>,
+    ) -> ExileCardEffect {
+        ExileCardEffect {
+            target,
+            source_card,
+            expires,
+            id: EffectID::new(),
+            applied: false,
+            previous_turn: None,
+            game,
+            target_id: None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Effect for ExileCardEffect {
+    fn get_source_card(&self) -> Option<&Arc<Mutex<Card>>> {
+        self.source_card.as_ref()
+    }
+    async fn apply(&mut self, turn: Turn) {
+        if !self.applied {
+            if let EffectTarget::Card(card_arc) = &self.target {
+                // let mut card = card_arc.lock().await;
+                // card.mark_exiled();
+                self.target_id = Some(card_arc.lock().await.id.clone());
+                self.game.lock().await.exile_card(card_arc).await;
+                println!("exiled card.");
+            }
+            self.applied = true;
+        }
+
+        // Decrement duration if applicable
+        match &mut self.expires {
+            ExpireContract::Turns(remaining) => {
+                if let Some(prev) = self.previous_turn {
+                    if prev != turn.turn_number && *remaining > 0 {
+                        *remaining -= 1;
+                        println!("remaining {:?}", remaining);
+                    }
+                } else {
+                    self.previous_turn = Some(turn.turn_number);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        // Decrement duration if applicable
+        match &self.expires {
+            ExpireContract::Turns(remaining) => *remaining == 0,
+            _ => false,
+        }
+    }
+
+    async fn cleanup(&mut self) {
+        if let EffectTarget::CardId(target_id) = &self.target {
+            println!("returning card.");
+            Game::exiled_card_to_battlefield(&self.game, target_id.clone()).await;
+        }
+    }
+
+    fn get_id(&self) -> &EffectID {
+        &self.id
+    }
 }
 
 #[derive(Debug)]
 pub struct StatModifierEffect {
     pub target: EffectTarget,
     pub stat_type: StatType,
-    pub amount: i8,
+    pub amount: i16,
     pub expires: ExpireContract, // None for permanent effects
     pub id: EffectID,
     pub applied: bool,
@@ -188,7 +274,7 @@ impl StatModifierEffect {
     pub fn new(
         target: EffectTarget,
         stat_type: StatType,
-        amount: i8,
+        amount: i16,
         expires: ExpireContract,
         source_card: Option<Arc<Mutex<Card>>>,
     ) -> StatModifierEffect {
@@ -225,6 +311,7 @@ impl Effect for StatModifierEffect {
                         .stat_manager
                         .add_stat(id, Stat::new(self.stat_type, self.amount));
                 }
+                EffectTarget::CardId(id) => todo!(),
             }
             self.applied = true;
         }
@@ -264,6 +351,7 @@ impl Effect for StatModifierEffect {
                 let mut player = player_arc.lock().await;
                 player.stat_manager.remove_stat(id_str);
             }
+            EffectTarget::CardId(_) => todo!(),
         }
     }
 
@@ -276,7 +364,7 @@ pub struct DynamicStatModifierEffect {
     pub target: EffectTarget,
     pub stat_type: StatType,
     pub amount_calculator:
-        Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync>,
+        Arc<dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i16> + Send>> + Send + Sync>,
     pub expires: ExpireContract,
     pub id: EffectID,
     pub applied: bool,
@@ -302,7 +390,7 @@ impl DynamicStatModifierEffect {
         target: EffectTarget,
         stat_type: StatType,
         amount_calculator: Arc<
-            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i8> + Send>> + Send + Sync,
+            dyn Fn(Arc<Mutex<Card>>) -> Pin<Box<dyn Future<Output = i16> + Send>> + Send + Sync,
         >,
         expires: ExpireContract,
         source_card: Option<Arc<Mutex<Card>>>,
@@ -357,6 +445,7 @@ impl Effect for DynamicStatModifierEffect {
                     let mut player = player_arc.lock().await;
                     player.stat_manager.remove_stat(id_str);
                 }
+                EffectTarget::CardId(_) => todo!(),
             }
         }
     }
@@ -372,22 +461,29 @@ impl Effect for DynamicStatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     if self.permanent_change {
-                        card.stats.modify_stat(self.stat_type, amount);
+                        card.stats.modify_stat(self.stat_type, amount).await;
                     } else {
                         // println!("{} should get {} {}", card.name, id, amount);
-                        card.stats.add_stat(id, Stat::new(self.stat_type, amount));
+                        card.stats
+                            .add_stat(id, Stat::new(self.stat_type, amount))
+                            .await;
                     }
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
                     if self.permanent_change {
-                        player.stat_manager.modify_stat(self.stat_type, amount);
+                        player
+                            .stat_manager
+                            .modify_stat(self.stat_type, amount)
+                            .await;
                     } else {
                         player
                             .stat_manager
-                            .add_stat(id, Stat::new(self.stat_type, amount));
+                            .add_stat(id, Stat::new(self.stat_type, amount))
+                            .await;
                     }
                 }
+                EffectTarget::CardId(_) => todo!(),
             }
             self.applied = true;
         }
@@ -404,7 +500,7 @@ impl Effect for DynamicStatModifierEffect {
 // #[derive(Debug)]
 // pub struct LifeDrainEffect {
 //     pub target: EffectTarget,
-//     pub amount: i8,
+//     pub amount: i16,
 //     pub expires: ExpireContract,
 //     pub id: EffectID,
 //     pub applied: bool,
@@ -414,7 +510,7 @@ impl Effect for DynamicStatModifierEffect {
 // impl LifeDrainEffect {
 //     pub fn new(
 //         target: EffectTarget,
-//         amount: i8,
+//         amount: i16,
 //         expires: ExpireContract,
 //         source_card: Option<Arc<Mutex<Card>>>,
 //     ) -> Self {

@@ -1,26 +1,36 @@
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tokio::sync::Mutex;
 use ulid::Ulid;
 use uuid::uuid;
+
+#[async_trait::async_trait]
+pub trait CardStatChangeListener: Debug + Send + Sync {
+    async fn on_stat_change(&self, stat_manager: &StatManager);
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Stat {
     pub stat_type: StatType,
-    pub intensity: i8,
+    pub intensity: i16,
 }
+#[async_trait::async_trait]
 pub trait Stats: Debug + Send + Sync {
-    fn add_stat(&mut self, id: String, stat: Stat);
-    fn remove_stat(&mut self, id: String);
-    fn get_stat_value(&self, stat_type: StatType) -> i8;
-    fn modify_stat(&mut self, stat_type: StatType, intensity: i8);
+    async fn add_stat(&mut self, id: String, stat: Stat);
+    async fn remove_stat(&mut self, id: String);
+    fn get_stat_value(&self, stat_type: StatType) -> i16;
+    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16);
 }
 
-#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq, Type)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Type)]
 pub struct StatManager {
     pub stats: HashMap<String, Stat>,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub listeners: Vec<Arc<Box<dyn CardStatChangeListener + Send + Sync>>>, // Use Arc<Mutex> for shared ownership
 }
 
 #[derive(Type, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,8 +41,11 @@ pub enum StatType {
     Trample,
     Lifelink,
     Flying,
+    Reach,
     Regenerate,
     Deathtouch,
+    Vigilance,
+    Counter,
 }
 
 #[derive(Debug)]
@@ -49,14 +62,14 @@ impl fmt::Display for StaticStatId {
 }
 
 impl Stat {
-    pub fn new(stat_type: StatType, intensity: i8) -> Stat {
+    pub fn new(stat_type: StatType, intensity: i16) -> Stat {
         Stat {
             stat_type,
             intensity,
         }
     }
 
-    pub fn set_intensity(&mut self, intensity: i8) {
+    pub fn set_intensity(&mut self, intensity: i16) {
         self.intensity = intensity
     }
 }
@@ -79,12 +92,14 @@ impl fmt::Display for StatType {
     }
 }
 
+#[async_trait::async_trait]
 impl Stats for StatManager {
-    fn add_stat(&mut self, id: String, stat: Stat) {
+    async fn add_stat(&mut self, id: String, stat: Stat) {
         self.stats.insert(id, stat);
+        self.notify_listeners().await;
     }
 
-    fn get_stat_value(&self, stat_type: StatType) -> i8 {
+    fn get_stat_value(&self, stat_type: StatType) -> i16 {
         let values = &self.stats;
         values
             .iter()
@@ -93,16 +108,18 @@ impl Stats for StatManager {
             .sum()
     }
 
-    fn modify_stat(&mut self, stat_type: StatType, intensity: i8) {
+    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
         for stat in &mut self.stats.values_mut() {
             if stat.stat_type == stat_type {
                 stat.intensity += intensity;
             }
         }
+        self.notify_listeners().await;
     }
 
-    fn remove_stat(&mut self, id: String) {
+    async fn remove_stat(&mut self, id: String) {
         self.stats.remove(&id);
+        self.notify_listeners().await;
     }
 }
 
@@ -110,12 +127,23 @@ impl StatManager {
     pub fn new(stats: Vec<Stat>) -> Self {
         let mut s = Self {
             stats: HashMap::new(),
+            listeners: vec![],
         };
 
         for stat in stats {
-            s.add_stat(Ulid::new().to_string(), stat);
+            s.stats.insert(Ulid::new().to_string(), stat);
         }
 
         s
+    }
+
+    pub fn add_listener(&mut self, listener: Arc<Box<dyn CardStatChangeListener + Send + Sync>>) {
+        self.listeners.push(listener);
+    }
+
+    async fn notify_listeners(&self) {
+        for listener in &self.listeners {
+            listener.on_stat_change(self).await;
+        }
     }
 }

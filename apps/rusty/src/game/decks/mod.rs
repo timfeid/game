@@ -11,6 +11,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use red::create_red_deck;
 use std::borrow::BorrowMut;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -43,8 +44,10 @@ use super::player::Player;
 pub struct Deck {
     pub draw_pile: Vec<Arc<Mutex<Card>>>,
     pub discard_pile: Vec<Arc<Mutex<Card>>>,
-    pub destroyed_pile: Vec<Arc<Mutex<Card>>>,
+    pub graveyard: Vec<Arc<Mutex<Card>>>,
     pub in_game: Vec<Arc<Mutex<Card>>>,
+    pub exiled: Vec<Arc<Mutex<Card>>>,
+    pub map: HashMap<String, Card>,
 }
 
 fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
@@ -73,11 +76,47 @@ impl Deck {
     }
 
     pub fn new(cards: Vec<Card>) -> Self {
+        let mut map = HashMap::new();
+        for card in cards.iter() {
+            map.insert(card.id.clone(), card.clone());
+        }
+
         Self {
             draw_pile: cards.into_iter().map(|c| Arc::new(Mutex::new(c))).collect(),
             discard_pile: vec![],
-            destroyed_pile: vec![],
+            graveyard: vec![],
             in_game: vec![],
+            exiled: vec![],
+            map,
+        }
+    }
+
+    // Shuffle the draw pile
+    pub async fn first_shuffle(&mut self) {
+        let mut deck_has_lands = false;
+        for card in self.draw_pile.iter() {
+            if let CardType::BasicLand(_) = card.lock().await.card_type {
+                deck_has_lands = true;
+                break;
+            }
+        }
+
+        if deck_has_lands {
+            let mut has_land = false;
+            while !has_land {
+                self.draw_pile.shuffle(&mut thread_rng());
+                println!("Shuffled deck");
+                for card in self.draw_pile[self.draw_pile.len() - 7..].iter() {
+                    match card.lock().await.card_type {
+                        CardType::BasicLand(_) => {
+                            has_land = true;
+                        }
+                        CardType::AdvancedLand(_) => has_land = true,
+                        CardType::AdvancedMultiLand(_, _) => has_land = true,
+                        _ => {}
+                    }
+                }
+            }
         }
     }
 
@@ -96,30 +135,46 @@ impl Deck {
         }
     }
 
-    // Discard a card
-    pub fn discard(&mut self, card: Arc<Mutex<Card>>) {
-        self.discard_pile.push(card);
-    }
-
     // Destroy a card
-    pub fn destroy(&mut self, card: Arc<Mutex<Card>>) {
-        self.destroyed_pile.push(card);
+    pub fn destroy(&mut self, id: String) {
+        if let Some(card) = self.fresh_ref(id) {
+            self.graveyard.push(card);
+        }
     }
 
     pub fn elsewhere(&mut self, card: Arc<Mutex<Card>>) {
         self.in_game.push(card);
     }
 
-    // Reshuffle discard pile back into the draw pile
-    fn reshuffle_discard_pile(&mut self) {
-        self.draw_pile.append(&mut self.discard_pile);
-        self.shuffle();
-    }
-
-    pub async fn set_owner(&self, player: &Arc<Mutex<Player>>) {
+    pub async fn set_owner(&mut self, player: &Arc<Mutex<Player>>) {
+        for card in self.map.values_mut() {
+            card.owner = Some(Arc::clone(player));
+        }
         for card in self.draw_pile.iter() {
             let mut d = card.lock().await;
             d.owner = Some(Arc::clone(player));
         }
+    }
+
+    pub fn exile(&mut self, id: String) {
+        if let Some(card) = self.fresh_ref(id) {
+            self.exiled.push(card);
+        }
+    }
+
+    pub(crate) fn fresh(&self, id: String) -> Option<Card> {
+        if let Some(x) = self.map.get(id.as_str()) {
+            return Some(x.clone());
+        }
+
+        None
+    }
+
+    pub(crate) fn fresh_ref(&self, id: String) -> Option<Arc<Mutex<Card>>> {
+        if let Some(x) = self.map.get(id.as_str()) {
+            return Some(Arc::new(Mutex::new(x.clone())));
+        }
+
+        None
     }
 }

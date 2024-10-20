@@ -25,11 +25,12 @@ impl CardAction for GenerateManaAction {
         card: Arc<Mutex<Card>>,
         target: EffectTarget,
         ability_id: Option<String>,
-    ) {
+    ) -> Result<(), String> {
         let owner = card.lock().await.owner.clone().unwrap();
         let player = &mut owner.lock().await;
         for mana in &self.mana_to_add {
             player.mana_pool.add_mana(*mana);
         }
+        Ok(())
     }
 }

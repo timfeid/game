@@ -15,6 +15,7 @@ use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use textwrap::fill;
 use tokio::{sync::Mutex, time::sleep};
+use ulid::Ulid;
 
 use crate::{
     error::{AppError, AppResult},
@@ -79,7 +80,7 @@ pub struct Player {
     #[serde(skip_serializing, skip_deserializing)]
     pub game: Option<Arc<Mutex<Game>>>, // Add this field
     #[serde(skip_serializing, skip_deserializing)]
-    pub health_at_start_of_round: i8,
+    pub health_at_start_of_round: i16,
     #[serde(skip_serializing, skip_deserializing)]
     pub spells: Vec<Arc<Mutex<Card>>>,
 }
@@ -94,10 +95,15 @@ impl fmt::Display for Player {
 impl Player {
     pub fn reset_spells(&mut self) {
         self.spells = vec![];
-        println!("reset spells");
     }
 
-    pub fn new(name: &str, health: i8, deck: Vec<Card>) -> Self {
+    pub async fn add_health(&mut self, amount: i16) {
+        self.stat_manager
+            .add_stat(Ulid::new().to_string(), Stat::new(StatType::Health, amount))
+            .await;
+    }
+
+    pub fn new(name: &str, health: i16, deck: Vec<Card>) -> Self {
         let mut player = Self {
             name: name.to_string(),
             stat_manager: StatManager::new(vec![Stat::new(StatType::Health, health)]),
@@ -159,12 +165,9 @@ impl Player {
 
     pub async fn return_card_to_hand(&mut self, card_arc: &Arc<Mutex<Card>>) {
         self.cards_in_play.retain(|c| !Arc::ptr_eq(c, card_arc));
-        self.cards_in_hand.push(Arc::clone(card_arc));
-    }
-
-    pub async fn remove_card_from_play(&mut self, card_arc: Arc<Mutex<Card>>) {
-        self.cards_in_play.retain(|c| !Arc::ptr_eq(c, &card_arc));
-        self.deck.destroy(card_arc);
+        if let Some(card) = self.deck.fresh_ref(card_arc.lock().await.id.clone()) {
+            self.cards_in_hand.push(card);
+        }
     }
 
     // pub async fn
@@ -333,7 +336,7 @@ impl Player {
 
         lines.push(format!("├{}┤", "─".repeat(width - 2)));
 
-        let mut stat_map: HashMap<StatType, i8> = HashMap::new();
+        let mut stat_map: HashMap<StatType, i16> = HashMap::new();
         for (_, stat) in &self.stat_manager.stats {
             *stat_map.entry(stat.stat_type.clone()).or_insert(0) += stat.intensity;
         }
@@ -749,20 +752,22 @@ impl Player {
         }
     }
 
+    pub async fn exile_card_in_play(
+        &mut self,
+        card_index: usize,
+        // game: &mut Game,
+    ) {
+        let card = &self.cards_in_play.remove(card_index);
+        self.deck.exile(card.lock().await.id.clone());
+    }
+
     pub async fn destroy_card_in_play(
         &mut self,
         card_index: usize,
-        turn: &Turn,
         // game: &mut Game,
-    ) -> Vec<Arc<dyn Action + Send + Sync>> {
+    ) {
         let card = &self.cards_in_play.remove(card_index);
-        self.deck.destroy(Arc::clone(card));
-
-        // let card = card.lock().await;
-        let actions =
-            Card::collect_phase_based_actions(card, turn, ActionTriggerType::CardDestroyed).await;
-
-        actions
+        self.deck.destroy(card.lock().await.id.clone());
     }
 
     // pub async fn collect_available_actions(
@@ -907,8 +912,8 @@ impl Player {
             .await;
     }
 
-    pub(crate) fn from_claims(user: &crate::services::jwt::Claims) -> Player {
-        Player::new(&user.sub, 20, vec![])
+    pub(crate) fn from_claims(user: &crate::services::jwt::Claims, health: i16) -> Player {
+        Player::new(&user.sub, health, vec![])
     }
 
     pub async fn empty_mana_pool(&mut self) {
@@ -1077,21 +1082,22 @@ impl Player {
     }
 }
 
+#[async_trait::async_trait]
 impl Stats for Player {
-    fn add_stat(&mut self, id: String, stat: Stat) {
-        self.stat_manager.add_stat(id, stat);
+    async fn add_stat(&mut self, id: String, stat: Stat) {
+        self.stat_manager.add_stat(id, stat).await;
     }
 
-    fn get_stat_value(&self, stat_type: StatType) -> i8 {
+    fn get_stat_value(&self, stat_type: StatType) -> i16 {
         self.stat_manager.get_stat_value(stat_type)
     }
 
-    fn modify_stat(&mut self, stat_type: StatType, intensity: i8) {
-        self.stat_manager.modify_stat(stat_type, intensity);
+    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
+        self.stat_manager.modify_stat(stat_type, intensity).await;
     }
 
-    fn remove_stat(&mut self, id: String) {
-        self.stat_manager.remove_stat(id);
+    async fn remove_stat(&mut self, id: String) {
+        self.stat_manager.remove_stat(id).await;
     }
 }
 

@@ -28,9 +28,10 @@ impl CardAction for CardAddStatAction {
         card: Arc<Mutex<Card>>,
         target: EffectTarget,
         ability_id: Option<String>,
-    ) {
+    ) -> Result<(), String> {
         println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;
         card.add_stat(self.id.clone(), self.stat.clone());
+        Ok(())
     }
 }

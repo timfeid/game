@@ -46,6 +46,12 @@ function isCard(
 	return 'Card' in frontendTarget;
 }
 
+function isBasicLand(
+	target: CardRequiredTarget
+): target is { BasicLand: [CardTargetTeam, boolean | null] } {
+	return typeof target === 'object' && 'BasicLand' in target;
+}
+
 function isCreatureWithPowerAndToughness(
 	target: CardRequiredTarget
 ): target is { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] } {
@@ -56,6 +62,10 @@ function isCardOfType(
 	target: CardRequiredTarget
 ): target is { CardOfType: [CardType, CardTargetTeam, boolean | null] } {
 	return typeof target === 'object' && 'CardOfType' in target;
+}
+
+export function findPlayer(game: GameState, player_index: number) {
+	return Object.values(game.players).find((p) => p.player_index === player_index);
 }
 
 function isCreatureTypeCardRequirement(
@@ -125,6 +135,17 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 							toughness === cardToughness
 						) {
 							return resolve(frontendTarget);
+						}
+					}
+					if (isBasicLand(ability.required_target)) {
+						console.log('hello?');
+						const player = game.players[ability.owner_player_id];
+						const [team, tapped] = ability.required_target.BasicLand;
+						if (team) {
+							console.log(team);
+							if (team === 'Owner' && ccard.frontend_target.player_index === player.player_index) {
+								return resolve(frontendTarget);
+							}
 						}
 					}
 					if (isCreatureTypeCardRequirement(ability.required_target)) {

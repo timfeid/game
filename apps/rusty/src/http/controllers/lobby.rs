@@ -9,7 +9,7 @@ use tokio_stream::StreamExt;
 
 use crate::{
     error::{AppError, AppResult},
-    game::FrontendTarget,
+    game::{FrontendCardTarget, FrontendTarget},
     lobby::{
         lobby::{DeckDetails, DeckSelector, Lobby, LobbyChat, LobbyData},
         manager::{LobbyCommand, LobbyManager},
@@ -43,8 +43,7 @@ pub struct RespondOptionalAbility {
 pub struct ActionCardArgs {
     pub trigger_id: String,
     pub code: String,
-    pub player_index: i32,
-    pub in_play_index: i32,
+    pub card: FrontendCardTarget,
     pub target: Option<FrontendTarget>,
 }
 

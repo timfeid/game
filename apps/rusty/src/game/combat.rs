@@ -26,13 +26,32 @@ impl Combat {
         self.attackers.push((card, target));
     }
 
-    /// Declare a blocker
     pub async fn declare_blocker(
         &mut self,
         blocker_card: Arc<Mutex<Card>>,
         attacker_card: Arc<Mutex<Card>>,
-    ) {
-        self.blockers.push((blocker_card, attacker_card));
+    ) -> Result<(), String> {
+        let attacker_has_flying = {
+            let attacker_card = attacker_card.lock().await;
+            attacker_card.get_stat_value(StatType::Flying) > 0
+        };
+
+        let blocker_has_flying_or_reach = {
+            let blocker_card = blocker_card.lock().await;
+            blocker_card.get_stat_value(StatType::Flying) > 0
+                || blocker_card.get_stat_value(StatType::Reach) > 0
+        };
+
+        if attacker_has_flying && !blocker_has_flying_or_reach {
+            Err(format!(
+                "Blocker {} cannot block attacker {} with flying",
+                blocker_card.lock().await.name,
+                attacker_card.lock().await.name
+            ))
+        } else {
+            self.blockers.push((blocker_card, attacker_card));
+            Ok(())
+        }
     }
 
     pub async fn resolve_combat(&mut self) -> Vec<Arc<Mutex<Card>>> {
@@ -69,7 +88,7 @@ impl Combat {
                         blocker_card.tapped = true;
                         blocker_card.remove_stat(StaticStatId::Regenerate.to_string());
                     } else {
-                        destroyed_cards.push(Arc::clone(attacker_card_arc));
+                        destroyed_cards.push(Arc::clone(blocking_card_arc));
                     }
                 }
             }
@@ -158,7 +177,7 @@ impl Combat {
 
     async fn apply_damage_to_target(
         &self,
-        damage: i8,
+        damage: i16,
         target: &EffectTarget,
         attacker_card_arc: &Arc<Mutex<Card>>,
     ) -> Option<Arc<Mutex<Card>>> {
@@ -202,6 +221,7 @@ impl Combat {
                     None
                 }
             }
+            _ => None,
         }
     }
 }

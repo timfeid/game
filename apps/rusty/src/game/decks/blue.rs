@@ -27,16 +27,17 @@ fn create_frost_breath() -> Card {
         "Frost Breath",
         "Tap up to two target creatures. They don't untap during their controller's next untap step.",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardPlayedFromHand,
+            ActionTriggerType::CardPlayedFromHand(None),
             CardRequiredTarget::MultipleCardsOfType(CardType::Creature, 2),
             Arc::new(AsyncClosureWithCardAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>,
                  source: Arc<Mutex<Card>>,
                  card_played: Arc<Mutex<Card>>|
-                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                 -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let mut card = card_played.lock().await;
                         card.tapped = true;
+                        Ok(())
                     })
                 },
             ))),
@@ -77,7 +78,7 @@ pub fn create_counterspell() -> Card {
         "Counter Spell",
         "Counter target spell.",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardPlayedFromHand,
+            ActionTriggerType::CardPlayedFromHand(None),
             CardRequiredTarget::Spell,
             Arc::new(CounterSpellAction {}),
         )],
@@ -93,7 +94,7 @@ pub fn create_divination() -> Card {
         "Divination",
         "Draw two cards.",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardPlayedFromHand,
+            ActionTriggerType::CardPlayedFromHand(None),
             CardRequiredTarget::None,
             Arc::new(DrawCardCardAction {
                 target: CardActionTarget::SelfOwner,
@@ -112,7 +113,7 @@ pub fn create_unsummon() -> Card {
         "Unsummon",
         "Return target creature to its owner's hand.",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardPlayedFromHand,
+            ActionTriggerType::CardPlayedFromHand(None),
             CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any, None),
             Arc::new(ReturnToHandAction {}),
         )],

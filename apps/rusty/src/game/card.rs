@@ -41,6 +41,7 @@ pub enum CreatureType {
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Type)]
 pub enum CardType {
     Creature,
+    Plainswalker,
     Enchantment,
     Instant,
     Sorcery,
@@ -69,11 +70,13 @@ pub enum CardPhase {
     Ready,
     Complete,
     Cancelled,
+    Exiled,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
 pub enum Counter {
-    PowerToughnessModifier(i8, i8),
+    PowerToughnessModifier(i16, i16),
+    Incremental(i16),
 }
 
 #[derive(Type, Debug, Deserialize, Serialize, Clone)]
@@ -97,9 +100,9 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub action_target: Option<EffectTarget>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub damage_dealt_to_players: i8,
+    pub damage_dealt_to_players: i16,
     #[serde(skip_serializing, skip_deserializing)]
-    pub damage_taken: i8,
+    pub damage_taken: i16,
     pub is_countered: bool,
     pub id: String,
     pub counters: HashMap<String, Counter>,
@@ -135,11 +138,6 @@ impl Card {
             is_countered: false,
             counters: HashMap::new(),
         };
-        card.triggers.push(CardActionTrigger::new(
-            ActionTriggerType::CardDestroyed,
-            CardRequiredTarget::None,
-            Arc::new(ResetCardAction {}),
-        ));
 
         card
     }
@@ -147,6 +145,12 @@ impl Card {
     pub async fn add_counter(card: Arc<Mutex<Self>>, game: &Arc<Mutex<Game>>, counter: Counter) {
         let id = Card::activate_counter(card.clone(), &counter, game).await;
         card.lock().await.counters.insert(id, counter);
+        let mut actions = game
+            .lock()
+            .await
+            .collect_card_stat_changed_actions(&card)
+            .await;
+        game.lock().await.execute_actions(&mut actions).await.ok();
     }
 
     pub async fn activate_counter(
@@ -178,6 +182,17 @@ impl Card {
                         None,
                     ))),
                 );
+                println!("applied power toughness counter!");
+            }
+            Counter::Incremental(total) => {
+                card.lock()
+                    .await
+                    .modify_stat(StatType::Counter, total.clone())
+                    .await;
+                // card.lock().await.add_stat(
+                //     Ulid::new().to_string(),
+                //     Stat::new(StatType::Counter, total.clone()),
+                // );
             }
         }
         id
@@ -194,8 +209,13 @@ impl Card {
                 ActionTriggerType::Attached => true,
                 ActionTriggerType::DamageApplied => true,
                 ActionTriggerType::OtherCardPlayed(_) => true,
+                ActionTriggerType::OtherCardDestroyed(_) => true,
+                ActionTriggerType::CardExiled => true,
+                ActionTriggerType::HealthGained => true,
+                ActionTriggerType::CardStatChanged => true,
+                ActionTriggerType::OtherCardExiled(trigger_target) => true,
 
-                ActionTriggerType::CardPlayedFromHand => false,
+                ActionTriggerType::CardPlayedFromHand(_) => false,
                 ActionTriggerType::Continuous => false,
                 ActionTriggerType::Detached => false,
                 ActionTriggerType::CardDestroyed => false,
@@ -300,11 +320,11 @@ impl Card {
                 ActionTriggerType::AbilityWithinPhases(
                     _,
                     mana_requirements,
-                    allowed_phases,
+                    phase_restrictions,
                     tap_required,
                 ) => {
-                    let in_phases = allowed_phases.is_none()
-                        || allowed_phases.as_ref().unwrap().contains(&turn_phase);
+                    let in_phases = phase_restrictions.is_none()
+                        || phase_restrictions.as_ref().unwrap().0.contains(&turn_phase);
 
                     if in_phases {
                         requires_tap = tap_required.clone();
@@ -340,15 +360,15 @@ impl Card {
                 ActionTriggerType::AbilityWithinPhases(
                     _,
                     mana_requirement,
-                    allowed_phases,
+                    phase_restrictions,
                     tap_required,
                 ) => {
                     if trigger_id != action_trigger.id {
                         continue;
                     }
                     mana_requirements = mana_requirement.clone();
-                    let in_phases = allowed_phases.is_none()
-                        || allowed_phases.as_ref().unwrap().contains(&turn_phase);
+                    let in_phases = phase_restrictions.is_none()
+                        || phase_restrictions.as_ref().unwrap().0.contains(&turn_phase);
 
                     let meets_requirements = (action_trigger.requirements)(
                         Arc::clone(&game),
@@ -374,6 +394,26 @@ impl Card {
         (actions, requires_tap, mana_requirements)
     }
 
+    pub async fn collect_card_destroyed_actions(
+        card_arc: &Arc<Mutex<Card>>,
+        turn: &Turn,
+    ) -> Vec<Arc<dyn Action + Send + Sync>> {
+        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+
+        for action_trigger in &card_arc.lock().await.triggers.clone() {
+            if let ActionTriggerType::CardDestroyed = &action_trigger.trigger_type {
+                actions.push(Arc::new(CardActionWrapper {
+                    card: Arc::clone(card_arc),
+                    action: action_trigger.action.clone(),
+                    target: None,
+                    ability_id: Some(action_trigger.id.clone()),
+                }));
+            }
+        }
+
+        actions
+    }
+
     pub async fn collect_phase_based_actions(
         card_arc: &Arc<Mutex<Card>>,
         turn: &Turn,
@@ -396,7 +436,7 @@ impl Card {
                 if trigger_phase.contains(&turn.phase)
                     && match trigger_target {
                         super::action::TriggerTarget::Owner => is_owner,
-                        super::action::TriggerTarget::Target => !is_owner,
+                        super::action::TriggerTarget::Opponent => !is_owner,
                         super::action::TriggerTarget::Any => true,
                     }
                 {
@@ -407,7 +447,7 @@ impl Card {
                             action::TriggerTarget::Owner => {
                                 Some(EffectTarget::Player(Arc::clone(&owner)))
                             }
-                            action::TriggerTarget::Target => {
+                            action::TriggerTarget::Opponent => {
                                 card_arc.lock().await.action_target.clone()
                             }
                             action::TriggerTarget::Any => None,
@@ -422,16 +462,6 @@ impl Card {
                     target: None,
                     ability_id: Some(action_trigger.id.clone()),
                 }));
-            } else if action_trigger.trigger_type == ActionTriggerType::CardPlayedFromHand
-                && trigger_type != ActionTriggerType::CardDestroyed
-            {
-                // println!("EXECUTING THIS {}", name);
-                // phase_based_actions.push(Arc::new(CardActionWrapper {
-                //     card: Arc::clone(card_arc),
-                //     action: action_trigger.action.clone(),
-                //     target: None,
-                //     ability_id: Some(action_trigger.id.clone()),
-                // }));
             }
         }
 
@@ -561,22 +591,23 @@ impl Card {
     }
 }
 
+#[async_trait::async_trait]
 impl Stats for Card {
-    fn add_stat(&mut self, id: String, stat: Stat) {
-        self.stats.add_stat(id, stat);
+    async fn add_stat(&mut self, id: String, stat: Stat) {
+        self.stats.add_stat(id, stat).await;
         println!("{}", self.render(30).join("\n"));
     }
 
-    fn get_stat_value(&self, stat_type: StatType) -> i8 {
+    fn get_stat_value(&self, stat_type: StatType) -> i16 {
         self.stats.get_stat_value(stat_type)
     }
 
-    fn modify_stat(&mut self, stat_type: StatType, intensity: i8) {
-        self.stats.modify_stat(stat_type, intensity);
+    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
+        self.stats.modify_stat(stat_type, intensity).await;
     }
 
-    fn remove_stat(&mut self, id: String) {
-        self.stats.remove_stat(id);
+    async fn remove_stat(&mut self, id: String) {
+        self.stats.remove_stat(id).await;
     }
 }
 
@@ -590,7 +621,7 @@ pub mod card {
             cards
         }};
     }
-    macro_rules! create_creature_card {
+    macro_rules! create_plainswalker_card {
         // Base case with additional stats
         ($name:expr, $creature_type:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*], [$($stat:expr),*] $(, $additional_triggers:expr)*) => {
             {
@@ -648,6 +679,65 @@ pub mod card {
         };
     }
 
+    macro_rules! create_creature_card {
+        // Base case with additional stats
+        ($name:expr, $creature_type:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*], [$($stat:expr),*] $(, $additional_triggers:expr)*) => {
+            {
+
+                let mut card = Card::new(
+                    $name,
+                    $description,
+                    {
+                        // Start with the default triggers
+                        #[allow(unused_mut)]
+                        let mut triggers = vec![
+                            // Action to declare the creature as an attacker in the Declare Attackers phase
+                            CardActionTrigger::new(
+                                ActionTriggerType::AbilityWithinPhases("Attack".to_string(), vec![], Some((vec![TurnPhase::DeclareAttackers], TriggerTarget::Owner)), true),
+                                CardRequiredTarget::EnemyCardOrPlayer,
+                                Arc::new(DeclareAttackerAction {}),
+                            ),
+                            // Action to manually declare the creature as a blocker in the Declare Blockers phase
+                            CardActionTrigger::new(
+                                ActionTriggerType::AbilityWithinPhases("Block".to_string(), vec![], Some((vec![TurnPhase::DeclareBlockers], TriggerTarget::Any)), false),
+                                CardRequiredTarget::EnemyCardInCombat,
+                                Arc::new(DeclareBlockerAction {}),
+                            ),
+                        ];
+
+                        // Add any additional triggers provided
+                        $(triggers.push($additional_triggers);)*
+
+                        triggers
+                    },
+                    // Card starts with a charging phase (this can be customized)
+                    CardPhase::Charging(1),
+                    // Card type is a Creature
+                    CardType::Creature,
+                    // Add the specified damage, defense, and additional stats
+                    {
+                        let mut stats = vec![
+                            Stat::new(StatType::Power, $damage),
+                            Stat::new(StatType::Toughness, $defense),
+                        ];
+
+                        // Add any extra stats (e.g. Trample, Flying)
+                        $(stats.push(Stat::new($stat, 1));)*
+
+                        stats
+                    },
+                    // Specify the mana requirements for the creature card
+                    vec![$($mana),*],
+                );
+                card.creature_type = Some($creature_type);
+                card
+            }
+
+
+        };
+    }
+
     pub(crate) use create_creature_card;
     pub(crate) use create_multiple_cards;
+    pub(crate) use create_plainswalker_card;
 }

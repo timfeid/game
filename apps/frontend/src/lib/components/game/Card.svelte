@@ -1,16 +1,24 @@
 <script lang="ts">
 	import type {
+		AbilityDetails,
 		Card,
 		CardPhase,
 		CardType,
 		CardWithDetails,
 		FrontendPileName,
+		FrontendTarget,
 		GameState,
 		ManaType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
 	import ManaBubble from './mana-bubble.svelte';
 	import Ability from './card/ability.svelte';
+	import { searchingForTarget, target, waitForTarget } from './game';
+	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
+	import { user } from '../../stores/access-token';
+	import { toast } from 'svelte-sonner';
+	import { client } from '../../client';
+	import { RSPCError } from '@rspc/client';
 
 	export let cardWithDetails: CardWithDetails;
 	export let game: GameState | undefined = undefined;
@@ -20,8 +28,38 @@
 	export let className: string = '';
 	export { className as class };
 	export let noTooltips = false;
+
 	$: card = cardWithDetails.card;
 
+	async function selectAbilityDialog(abilities: AbilityDetails[]): Promise<AbilityDetails> {
+		return await new Promise((resolve, reject) => {
+			let t: NodeJS.Timeout;
+			toast.info('Please select an ability');
+			selectedAbility.set(null);
+			selectFromAbilities.set(abilities);
+			selectedAbility.subscribe((ability) => {
+				if (ability) {
+					clearTimeout(t);
+					resolve(ability);
+				}
+			});
+			t = setTimeout(() => reject('ran out of time'), 10000);
+		});
+	}
+
+	async function selectAbility(card: CardWithDetails) {
+		let met = card.abilities.filter(
+			(c) => c.meets_mana_requirements && c.meets_requirements_except_mana
+		);
+		if (met.length === 0) {
+			return;
+		}
+		if (met.length === 1) {
+			return met[0];
+		}
+
+		return selectAbilityDialog(met);
+	}
 	// Function to display the current phase in a readable format
 	function displayCurrentPhase(phase: CardPhase) {
 		if (typeof phase === 'string') {
@@ -40,7 +78,8 @@
 
 	function displayOtherStats(stats: (typeof card)['stats']) {
 		return Object.values(stats.stats).filter(
-			(stat) => stat.stat_type !== 'Power' && stat.stat_type !== 'Toughness'
+			(stat) =>
+				stat.stat_type !== 'Power' && stat.stat_type !== 'Toughness' && stat.stat_type !== 'Counter'
 		);
 	}
 
@@ -77,13 +116,67 @@
 		: isAdvancedLand(card.card_type)
 			? card.card_type.AdvancedLand
 			: null;
+
+	async function actionCard() {
+		if ($searchingForTarget) {
+			console.log('set target.');
+			target.set({ Card: cardWithDetails.frontend_target });
+			return;
+		}
+		const player = Object.values(game?.players || {}).find(
+			(p) => p.player_index === cardWithDetails.frontend_target.player_index
+		);
+		if (player && game) {
+			if ($user?.sub === player.sub) {
+				try {
+					console.log(cardWithDetails.abilities);
+					const ability = await selectAbility(cardWithDetails);
+					if (!ability) {
+						const maybeAbilities = cardWithDetails.abilities.filter(
+							(a) => a.meets_requirements_except_mana
+						);
+						if (maybeAbilities.length) {
+							throw new Error(
+								`Not enough mana to cast ${maybeAbilities[0].action_type} for ${card.name}`
+							);
+						}
+						throw new Error('This card has no ability right now.');
+					}
+
+					const target = await waitForTarget(ability, game);
+					await executeAction(target, ability);
+				} catch (e) {
+					toast.error((e as Error).toString());
+				}
+			}
+		}
+	}
+
+	async function executeAction(target: FrontendTarget | null, ability: AbilityDetails) {
+		try {
+			await client.mutation([
+				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
+				{
+					code: game!.code,
+					card: cardWithDetails.frontend_target,
+					target,
+					trigger_id: ability.id
+				}
+			]);
+		} catch (e) {
+			if (e instanceof RSPCError) {
+				return toast.error(e.message);
+			}
+			toast.error('Unknown error!');
+		}
+	}
 </script>
 
 <button
-	on:click
+	on:click={actionCard}
 	class:rotate-90={card.tapped}
 	class:scale-75={card.tapped}
-	class="flex flex-col card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
+	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
 	data-player-index={cardWithDetails.frontend_target.player_index}
@@ -121,7 +214,7 @@
 			class:dark:bg-black={manaType === 'Black'}
 			class:dark:bg-white={manaType === 'White'}
 		>
-			<h2 class="text-sm font-bold truncate">
+			<h2 class="text-xs leading-6 font-bold truncate">
 				{card.name}
 			</h2>
 			<div class="absolute flex space-x-0.5 top-2 right-2">
@@ -131,10 +224,10 @@
 			</div>
 		</div>
 
-		<div class="card-type mb-2 flex w-full text-xs py-0.5 px-2 font-mono">
+		<div class="card-type mb-2 flex w-full py-0.5 px-2 font-mono">
 			<div class="text-gray-500 dark:text-stone-600 text-left uppercase">
 				{#if typeof card.card_type === 'string'}
-					{#if card.creature_type}
+					{#if card.creature_type && card.creature_type !== 'None'}
 						{card.creature_type}
 					{/if}
 					{card.card_type}
@@ -147,6 +240,10 @@
 			{#if !!damage || !!defense}
 				<div class="ml-auto">
 					{damage}/{defense}
+				</div>
+			{:else if card.card_type === 'Plainswalker'}
+				<div class="ml-auto">
+					{Object.values(card.stats.stats).find((x) => x.stat_type === 'Counter')?.intensity}
 				</div>
 			{/if}
 		</div>
@@ -165,8 +262,8 @@
 			</ul>
 		</div>
 
-		<div class="text-left mb-6 px-2 text-sm">
-			<p class="text-gray-700 dark:text-gray-300">{card.description}</p>
+		<div class="text-left mb-6 px-2">
+			<p class="text-gray-700 dark:text-gray-300 line-clamp-6 mb-1.5">{card.description}</p>
 			<div class="space-y-1.5">
 				{#each cardWithDetails.abilities as ability}
 					{#if ability.show}
@@ -178,6 +275,24 @@
 					{/if}
 				{/each}
 			</div>
+			{#if card.card_type === 'Creature' && Object.values(card.counters).length > 0}
+				<div class=" text-muted">Counters</div>
+				<div class="flex space-x-2">
+					{#each Object.entries(Object.values(card.counters).reduce((acc, counter) => {
+							const key = `${counter.PowerToughnessModifier[0]}/${counter.PowerToughnessModifier[1]}`;
+							if (!acc[key]) {
+								acc[key] = 1;
+							} else {
+								acc[key]++;
+							}
+							return acc;
+						}, {})) as [key, count]}
+						<div>
+							{count}x {key}
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 		<div class="text-left px-2 absolute top-full pb-1 -translate-y-full">
 			<span class="text-xs text-gray-400 uppercase font-sans">

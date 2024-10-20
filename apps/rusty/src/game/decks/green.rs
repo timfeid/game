@@ -4,8 +4,8 @@ use crate::{
             generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
             ApplyEffectToPlayerCardType, ApplyEffectToTargetAction,
             ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
-            AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, CardAction,
-            CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
+            AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, BlankAction,
+            CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
             CardTargetTeam, CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
             ChooseFromSelectionAction, DamageTarget, DeclareAttackerAction, DeclareBlockerAction,
             DrawCardAction, DrawCardCardAction, PlayCardAction, PlayerActionTarget,
@@ -37,35 +37,58 @@ fn create_test_forest() -> Card {
     Card::new(
         "Forest",
         "",
-        vec![CardActionTrigger::new(
-            ActionTriggerType::AbilityWithinPhases(
-                "Add 1 {G} to your pool".to_string(),
-                vec![],
-                None,
-                true,
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
             ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
-                mana_to_add: vec![
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                    ManaType::Green,
-                ],
-                target: PlayerActionTarget::Owner,
-            }),
-        )],
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {G} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                        ManaType::Green,
+                    ],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
         CardPhase::Ready,
         CardType::BasicLand(ManaType::Green),
         vec![],
@@ -77,19 +100,42 @@ fn create_forest() -> Card {
     Card::new(
         "Forest",
         "",
-        vec![CardActionTrigger::new(
-            ActionTriggerType::AbilityWithinPhases(
-                "Add 1 {G} to your pool".to_string(),
-                vec![],
-                None,
-                true,
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
             ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
-                mana_to_add: vec![ManaType::Green],
-                target: PlayerActionTarget::Owner,
-            }),
-        )],
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {G} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![ManaType::Green],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
         CardPhase::Ready,
         CardType::BasicLand(ManaType::Green),
         vec![],
@@ -130,7 +176,7 @@ pub fn create_devoted_druid() -> Card {
             Arc::new(AsyncClosureAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>,
                  card: Arc<Mutex<Card>>|
-                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                 -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         Card::add_counter(
                             card.clone(),
@@ -139,6 +185,7 @@ pub fn create_devoted_druid() -> Card {
                         )
                         .await;
                         card.lock().await.untap();
+                        Ok(())
                     })
                 }
             ))),
@@ -253,7 +300,7 @@ pub fn create_elvish_warmaster() -> Card {
             ActionTriggerType::CreatureTypeCardPlayed(TriggerTarget::Owner, CreatureType::Elf),
             CardRequiredTarget::None,
             Arc::new(AsyncClosureActionWithTargetAndAbility::new(Arc::new(
-                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, _target, ability_id| -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, _target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let (owner, played) = {
                             let card = card.lock().await;
@@ -266,6 +313,7 @@ pub fn create_elvish_warmaster() -> Card {
                         if played == 1 {
                             Game::play_token(&game, &owner, create_creature_card!("Token", CreatureType::Elf, "", 1,1, [], [])).await.ok();
                         }
+                        Ok(())
                     })
                 }
             )))
@@ -395,7 +443,7 @@ pub fn create_elvish_archdruid() -> Card {
             Arc::new(AsyncClosureAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>,
                  card: Arc<Mutex<Card>>|
-                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                 -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let owner = card.lock().await.owner.clone().unwrap();
                         let cards_in_play = &owner.lock().await.cards_in_play.clone();
@@ -404,6 +452,7 @@ pub fn create_elvish_archdruid() -> Card {
                                 owner.lock().await.mana_pool.add_mana(ManaType::Green);
                             }
                         }
+                        Ok(())
                     })
                 }
             )))
@@ -431,7 +480,7 @@ pub fn create_priest_of_titania() -> Card {
             Arc::new(AsyncClosureAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>,
                  card: Arc<Mutex<Card>>|
-                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                 -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let owner = card.lock().await.owner.clone().unwrap();
                         let cards_in_play = &owner.lock().await.cards_in_play.clone();
@@ -440,6 +489,7 @@ pub fn create_priest_of_titania() -> Card {
                                 owner.lock().await.mana_pool.add_mana(ManaType::Green);
                             }
                         }
+                        Ok(())
                     })
                 }
             )))
@@ -452,13 +502,14 @@ fn regenerate_target_card() -> Arc<AsyncClosureWithCardAction> {
         |game: Arc<Mutex<Game>>,
          source: Arc<Mutex<Card>>,
          target_card: Arc<Mutex<Card>>|
-         -> Pin<Box<dyn Future<Output = ()> + Send>> {
+         -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
             Box::pin(async move {
                 let mut card = target_card.lock().await;
                 card.add_stat(
                     StaticStatId::Regenerate.to_string(),
                     Stat::new(StatType::Regenerate, 1),
                 );
+                Ok(())
             })
         },
     )))
@@ -495,7 +546,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                         |game: Arc<Mutex<Game>>,
                          source_card: Arc<Mutex<Card>>,
                          target: Arc<Mutex<Card>>|
-                         -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                         -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                             Box::pin(async move {
                                 {
                                     target.lock().await.tapped = true;
@@ -518,7 +569,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
-                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                    -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                         Box::pin(async move {
                                                             { target.lock().await.tapped = true; }
 
@@ -547,7 +598,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                 |game: Arc<Mutex<Game>>,
                                                 source_card: Arc<Mutex<Card>>,
                                                 target: Arc<Mutex<Card>>|
-                                                -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                     Box::pin(async move {
                                                         println!("source????? {:?}", source_card);
                                                         let card_type = { target.lock().await.card_type };
@@ -558,18 +609,21 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                         } else {
                                                             println!("we need to reveal this bitch");
                                                         }
+                                                        Ok(())
                                                 })
                                             })))
                                             }))) ,
                                                                     target: None
-                                                                })]).await;
+                                                                })]).await?;
+                                                        Ok(())
                                                         })
                                                     },
                                                 )))
                                             })
                                         }) ,
                                         target: None
-                                    })]).await;
+                                    })]).await?;
+                                Ok(())
                             })
                         },
                     )))
@@ -748,7 +802,7 @@ pub fn create_heritage_druid() -> Card {
                         |game: Arc<Mutex<Game>>,
                          source_card: Arc<Mutex<Card>>,
                          target: Arc<Mutex<Card>>|
-                         -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                         -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                             Box::pin(async move {
                                 {
                                     target.lock().await.tapped = true;
@@ -771,7 +825,7 @@ pub fn create_heritage_druid() -> Card {
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
-                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                    -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                         Box::pin(async move {
                                                             { target.lock().await.tapped = true; }
 
@@ -792,7 +846,7 @@ pub fn create_heritage_druid() -> Card {
                                                                                 |game: Arc<Mutex<Game>>,
                                                                                 source_card: Arc<Mutex<Card>>,
                                                                                 target: Arc<Mutex<Card>>|
-                                                                                -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                                                -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                                                     Box::pin(async move {
                                                                                         { target.lock().await.tapped = true; }
 
@@ -801,21 +855,24 @@ pub fn create_heritage_druid() -> Card {
                                                                                                 card: source_card,
                                                                                                 action: Arc::new(GenerateManaAction {mana_to_add: vec![ManaType::Green, ManaType::Green, ManaType::Green], target: PlayerActionTarget::Owner}) ,
                                                                                                 target: None
-                                                                                            })]).await;
+                                                                                            })]).await?;
+                                                                                            Ok(())
                                                                                     })
                                                                                 },
                                                                             )))
                                                                         })
                                                                     }) ,
                                                                     target: None
-                                                                })]).await;
+                                                                })]).await?;
+                                                        Ok(())
                                                         })
                                                     },
                                                 )))
                                             })
                                         }) ,
                                         target: None
-                                    })]).await;
+                                    })]).await?;
+                                                        Ok(())
                             })
                         },
                     )))
@@ -887,7 +944,7 @@ pub fn create_wirewood() -> Card {
                 ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
 
                     Arc::new(AsyncClosureAction::new(Arc::new(
-                        |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                        |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                         Box::pin(async move {
                         let owner_arc = {
                             let card = card.lock().await;
@@ -920,10 +977,11 @@ pub fn create_wirewood() -> Card {
                                                     |game: Arc<Mutex<Game>>,
                                                     source: Arc<Mutex<Card>>,
                                                     card_played: Arc<Mutex<Card>>|
-                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                    -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                         Box::pin(async move {
                                                             let mut card = card_played.lock().await;
                                                             card.tapped = false;
+                                                            Ok(())
                                                         })
                                                     },
                                                 )))
@@ -931,9 +989,10 @@ pub fn create_wirewood() -> Card {
                                             })
                                         }) ,
                                         target: None
-                                    })]).await;
+                                    })]).await?;
                         }
 
+                    Ok(())
                     })
                 },
             )))})}),
@@ -1042,6 +1101,27 @@ pub fn create_cavern_of_souls() -> Card {
         "",
         vec![
             CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
+            ),
+            CardActionTrigger::new(
                 ActionTriggerType::AbilityWithinPhases(
                     "Add {C} to your mana pool.".to_string(),
                     vec![],
@@ -1075,6 +1155,27 @@ pub fn create_pendelhaven() -> Card {
         "Pendelhaven",
         "",
         vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
+            ),
             CardActionTrigger::new(
                 ActionTriggerType::AbilityWithinPhases("Add {G}".to_string(), vec![], None, true),
                 CardRequiredTarget::None,
@@ -1131,12 +1232,12 @@ pub fn create_chord_of_calling() -> Card {
         "Chord of Calling",
         "Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle.",
         vec![CardActionTrigger::new(
-            ActionTriggerType::CardPlayedFromHand,
+            ActionTriggerType::CardPlayedFromHand(Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner))),
             CardRequiredTarget::None,
             Arc::new(AsyncClosureAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>,
                  source: Arc<Mutex<Card>>|
-                 -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                 -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let owner = source.lock().await.owner.clone().unwrap();
                         let mut cards = vec![];
@@ -1164,7 +1265,7 @@ pub fn create_chord_of_calling() -> Card {
                                                 |game: Arc<Mutex<Game>>,
                                                 source_card: Arc<Mutex<Card>>,
                                                 target: Arc<Mutex<Card>>|
-                                                -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                     Box::pin(async move {
                                                         println!("source????? {:?}", source_card);
                                                         let position = game.lock().await.frontend_target_from_card(&target).await;
@@ -1191,7 +1292,7 @@ pub fn create_chord_of_calling() -> Card {
                                                         //                     |game: Arc<Mutex<Game>>,
                                                         //                     source_card: Arc<Mutex<Card>>,
                                                         //                     target: Arc<Mutex<Card>>|
-                                                        //                     -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                        //                     -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                         //                         Box::pin(async move {
                                                         //                             { target.lock().await.tapped = false; }
 
@@ -1202,6 +1303,7 @@ pub fn create_chord_of_calling() -> Card {
                                                         //         }) ,
                                                         //         target: None
                                                         //     })]).await;
+                                                        Ok(())
                                                 })
                                             })))
                                             }))),
@@ -1211,6 +1313,7 @@ pub fn create_chord_of_calling() -> Card {
 
                     // get cards in deck
                     // send
+                    Ok(())
                     })
                 },
             ))),
@@ -1243,11 +1346,11 @@ pub fn create_quirion_ranger() -> Card {
                         |game: Arc<Mutex<Game>>,
                         source_card: Arc<Mutex<Card>>,
                         target: Arc<Mutex<Card>>|
-                        -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                        -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                             Box::pin(async move {
                                 let source_card_cloned = source_card.clone();
                                 {
-                                    game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {action:Arc::new(ReturnToHandAction{}), card: source_card_cloned, target: Some(EffectTarget::Card(target)), ability_id: None })]).await;
+                                    game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {action:Arc::new(ReturnToHandAction{}), card: source_card_cloned, target: Some(EffectTarget::Card(target)), ability_id: None })]).await?;
                                 }
 
                                 game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
@@ -1267,9 +1370,9 @@ pub fn create_quirion_ranger() -> Card {
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
-                                                    -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                                                    -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                                         Box::pin(async move {
-                                                            { target.lock().await.tapped = false; }
+                                                            { target.lock().await.tapped = false; Ok(()) }
 
                                                         })
                                                     },
@@ -1277,7 +1380,8 @@ pub fn create_quirion_ranger() -> Card {
                                             })
                                         }) ,
                                         target: None
-                                    })]).await;
+                                    })]).await?;
+                        Ok(())
                         })
                     }))),
 
@@ -1335,6 +1439,27 @@ pub fn create_temple_garden() -> Card {
         "As Temple Garden enters, you may pay 2 life. If you don't, it enters tapped.",
         vec![
             CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
+            ),
+            CardActionTrigger::new(
                 ActionTriggerType::AbilityWithinPhases(
                     "Add {G} or {W} to your mana pool.".to_string(),
                     vec![],
@@ -1348,7 +1473,7 @@ pub fn create_temple_garden() -> Card {
                 }),
             ),
             CardActionTrigger::new(
-                ActionTriggerType::CardPlayedFromHand,
+                ActionTriggerType::CardPlayedFromHand(Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner))),
                 CardRequiredTarget::None,
                 Arc::new(CastOptionalAdditionalAbility {
                     action_type: ActionType::None,
@@ -1361,9 +1486,10 @@ pub fn create_temple_garden() -> Card {
                         Arc::new(AsyncClosureAction::new(Arc::new(
                             |game: Arc<Mutex<Game>>,
                             source: Arc<Mutex<Card>>|
-                            -> Pin<Box<dyn Future<Output = ()> + Send>> {
+                            -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                                 Box::pin(async move {
-                                    source.lock().await.owner.as_ref().unwrap().lock().await.modify_stat(StatType::Health, -2);
+                                    source.lock().await.owner.as_ref().unwrap().lock().await.modify_stat(StatType::Health, -2).await;
+                                    Ok(())
                                 })
                             },
                         )))
@@ -1371,7 +1497,6 @@ pub fn create_temple_garden() -> Card {
                     }),
 
                     canceled: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                        println!("hello?");
                         Arc::new(TapCardAction {})
                             as Arc<dyn CardAction + Send + Sync>
                     }),
@@ -1403,10 +1528,10 @@ pub fn create_green_deck_v2() -> Vec<Card> {
 
     deck.append(&mut duplicate_card(create_chord_of_calling(), 4));
 
-    deck.append(&mut duplicate_card(create_cavern_of_souls(), 3));
+    // deck.append(&mut duplicate_card(create_cavern_of_souls(), 3));
     deck.append(&mut duplicate_card(create_temple_garden(), 3));
     deck.append(&mut duplicate_card(create_pendelhaven(), 2));
-    deck.append(&mut duplicate_card(create_forest(), 15));
+    deck.append(&mut duplicate_card(create_forest(), 18));
 
     // deck.append(&mut duplicate_card(create_test_forest(), 1));
     // deck.append(&mut duplicate_card(create_pendelhaven(), 1));
@@ -1455,7 +1580,7 @@ mod test {
             mana,
             player::Player,
             turn::TurnPhase,
-            CardWithDetails, Game,
+            CardWithDetails, FrontendCardTarget, FrontendPileName, Game,
         },
         lobby::manager::LobbyManager,
     };
@@ -1638,29 +1763,61 @@ mod test {
         let details = CardWithDetails::from_card_arc(a.unwrap(), &ga).await;
         println!("{:?}", details.abilities);
 
-        ga.lock()
-            .await
-            .activate_card_action(&player, 2, None, details.abilities[0].id.clone())
-            .await
-            .expect("oh no?");
+        Game::activate_card_action(
+            &ga,
+            &player,
+            FrontendCardTarget {
+                player_index: 0,
+                pile: FrontendPileName::Play,
+                card_index: 0,
+            },
+            None,
+            details.abilities[0].id.clone(),
+        )
+        .await
+        .expect("oh no?");
 
-        ga.lock()
-            .await
-            .activate_card_action(&player, 2, None, details.abilities[1].id.clone())
-            .await
-            .expect("oh no?");
+        Game::activate_card_action(
+            &ga,
+            &player,
+            FrontendCardTarget {
+                player_index: 0,
+                pile: FrontendPileName::Play,
+                card_index: 0,
+            },
+            None,
+            details.abilities[1].id.clone(),
+        )
+        .await
+        .expect("oh no?");
 
-        ga.lock()
-            .await
-            .activate_card_action(&player, 2, None, details.abilities[0].id.clone())
-            .await
-            .expect("oh no?");
+        Game::activate_card_action(
+            &ga,
+            &player,
+            FrontendCardTarget {
+                player_index: 0,
+                pile: FrontendPileName::Play,
+                card_index: 0,
+            },
+            None,
+            details.abilities[0].id.clone(),
+        )
+        .await
+        .expect("oh no?");
 
-        ga.lock()
-            .await
-            .activate_card_action(&player, 2, None, details.abilities[1].id.clone())
-            .await
-            .expect("oh no?");
+        Game::activate_card_action(
+            &ga,
+            &player,
+            FrontendCardTarget {
+                player_index: 0,
+                pile: FrontendPileName::Play,
+                card_index: 0,
+            },
+            None,
+            details.abilities[1].id.clone(),
+        )
+        .await
+        .expect("oh no?");
         ga.lock().await.print().await;
     }
 }

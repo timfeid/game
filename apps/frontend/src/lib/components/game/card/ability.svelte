@@ -12,7 +12,7 @@
 </script>
 
 <Tooltip>
-	<svelte:component this={noTooltips ? Fragment : TooltipTrigger} class="block text-left">
+	<svelte:component this={noTooltips ? Fragment : TooltipTrigger} class=" text-left line-clamp-3">
 		{#if ability.action_type == 'Tap'}
 			<CornerDownLeft size="10" class="rotate-180 shrink-0 inline" />
 		{/if}
@@ -21,9 +21,9 @@
 			<ManaBubble class="inline-block" color={mana} />&nbsp;
 		{/each}
 
-		<span class:text-muted={!ability.meets_requirements_except_mana && !inHand} class="text-left"
-			>{ability.description}</span
-		>
+		<span class:text-muted={!ability.meets_requirements_except_mana && !inHand} class="text-left">
+			{ability.description}
+		</span>
 	</svelte:component>
 	<TooltipContent class="max-w-[10rem] text-center">
 		{#if ability.meets_requirements_except_mana && ability.meets_mana_requirements}

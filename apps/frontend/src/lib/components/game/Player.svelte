@@ -99,31 +99,6 @@
 		}
 	}
 
-	async function actionCard(index: number) {
-		console.log(index, 'was clicked on', playerName, player);
-		console.log(self);
-		if ($searchingForTarget) {
-			console.log('set target.');
-			target.set({ Card: { player_index: player.player_index, card_index: index, pile: 'Play' } });
-			return;
-		}
-		const card = player.public_info.cards_in_play[index];
-		if (self.player_index === player.player_index) {
-			try {
-				console.log(card.abilities);
-				const ability = await selectAbility(card);
-				if (!ability) {
-					throw new Error('This card has no ability right now.');
-				}
-
-				const target = await waitForTarget(ability, game);
-				await executeAction(index, card, target, ability);
-			} catch (e) {
-				toast.error((e as Error).toString());
-			}
-		}
-	}
-
 	async function setPlayerTarget(player: PlayerState) {
 		target.set({ Player: player.player_index });
 	}

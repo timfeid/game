@@ -31,10 +31,14 @@ pub struct LobbyData {
 }
 impl Default for LobbyData {
     fn default() -> LobbyData {
+        let mut game_state = GameState::default();
+        let code = ulid::Ulid::new().to_string();
+        game_state.code = code.clone();
+
         LobbyData {
-            join_code: ulid::Ulid::new().to_string(),
+            join_code: code,
             chat: vec![],
-            game_state: GameState::default(),
+            game_state: game_state,
         }
     }
 }
@@ -179,7 +183,7 @@ impl Lobby {
         if !self.data.game_state.players.contains_key(&user.sub) {
             let (index, player) = {
                 let mut game = self.game.lock().await;
-                let player = Player::from_claims(user);
+                let player = Player::from_claims(user, game.starting_health);
                 let player = game.add_player(player).await;
                 let index = game.players.len() - 1;
                 (index, player)
@@ -187,7 +191,7 @@ impl Lobby {
 
             let player = self.data.game_state.players.insert(
                 user.sub.clone(),
-                PlayerState::from_player(player, index as i32),
+                PlayerState::from_player(player, index as i32, user.sub.clone()),
             );
             if self.data.game_state.players.len() == 1 {
                 self.data
@@ -214,7 +218,11 @@ impl Lobby {
     }
 
     pub async fn list_desks(&mut self, user: &Claims) -> Vec<DeckSelector> {
-        return vec![DeckSelector::Elves, DeckSelector::Elves2];
+        return vec![
+            DeckSelector::Elves,
+            DeckSelector::Elves2,
+            DeckSelector::Angels,
+        ];
     }
 
     pub async fn get_deck_info(&self, deck: DeckSelector) -> DeckDetails {
@@ -259,11 +267,10 @@ impl Lobby {
         if let Some(player) = self.data.game_state.players.get_mut(&user.sub) {
             player.status = PlayerStatus::Ready;
             let mut p = player.player.lock().await;
-            let deck = Deck::new_from_selection(&player.deck);
+            let mut deck = Deck::new_from_selection(&player.deck);
             deck.set_owner(&player.player).await;
 
             p.deck = deck;
-            p.deck.shuffle();
         }
 
         self
@@ -329,18 +336,15 @@ impl Lobby {
 
     pub async fn action_card(
         &mut self,
-        player_index: usize,
-        in_play_index: usize,
+        frontend_card: FrontendCardTarget,
         target: Option<EffectTarget>,
         trigger_id: String,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let player = Arc::clone(&self.game.lock().await.players[player_index]);
+        let player =
+            Arc::clone(&self.game.lock().await.players[frontend_card.player_index as usize]);
 
-        self.game
-            .lock()
-            .await
-            .activate_card_action(&player, in_play_index, target, trigger_id)
+        Game::activate_card_action(&self.game, &player, frontend_card, target, trigger_id)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 
@@ -365,7 +369,7 @@ impl Lobby {
     }
 
     pub async fn start_game(&mut self) {
-        self.game.lock().await.start().await;
+        Game::start(&self.game).await;
     }
 
     pub fn message(&mut self, user: &Claims, message: String) -> &mut Self {
