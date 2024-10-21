@@ -6,7 +6,7 @@
 	import { client } from '../../client';
 	import { user } from '../../stores/access-token';
 	import Button from '../ui/button/button.svelte';
-	import ManaBubble from './mana-bubble.svelte';
+	import ManaBubble from './mana-bubble/mana-bubble.svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import Card from './Card.svelte';
@@ -20,6 +20,8 @@
 
 	let deck: DeckSelector | undefined;
 	$: deck = self.deck;
+
+	$: console.log(JSON.stringify(deckDetails?.cards.map((x) => x.card)));
 
 	let deckDetails: DeckDetails | undefined;
 

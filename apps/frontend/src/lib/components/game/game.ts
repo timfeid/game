@@ -64,10 +64,6 @@ function isCardOfType(
 	return typeof target === 'object' && 'CardOfType' in target;
 }
 
-export function findPlayer(game: GameState, player_index: number) {
-	return Object.values(game.players).find((p) => p.player_index === player_index);
-}
-
 function isCreatureTypeCardRequirement(
 	target: CardRequiredTarget
 ): target is { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } {
@@ -79,10 +75,9 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 		toast.info('Please select your target');
 		target.set(null);
 		target.subscribe((frontendTarget) => {
+			console.log(game, game.players);
 			if (isCard(frontendTarget)) {
-				const targetPlayer = Object.values(game.players).find(
-					(p) => p.player_index == frontendTarget.Card.player_index
-				);
+				const targetPlayer = game.players[frontendTarget.Card.player_id];
 				let pile;
 				if (frontendTarget.Card.pile === 'Spell') {
 					pile = targetPlayer!.public_info.spells;
@@ -111,7 +106,7 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 							return (
 								x.attacker.pile === frontendTarget.Card.pile &&
 								x.attacker.card_index === frontendTarget.Card.card_index &&
-								x.attacker.player_index === frontendTarget.Card.player_index
+								x.attacker.player_id === frontendTarget.Card.player_id
 							);
 						})
 					) {
@@ -139,11 +134,11 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 					}
 					if (isBasicLand(ability.required_target)) {
 						console.log('hello?');
-						const player = game.players[ability.owner_player_id];
+						const player = game.players[ability.owner_player_id!];
 						const [team, tapped] = ability.required_target.BasicLand;
 						if (team) {
 							console.log(team);
-							if (team === 'Owner' && ccard.frontend_target.player_index === player.player_index) {
+							if (team === 'Owner' && ccard.frontend_target.player_id === player.sub) {
 								return resolve(frontendTarget);
 							}
 						}

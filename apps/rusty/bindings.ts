@@ -24,41 +24,47 @@ export type Procedures = {
         { key: "lobby.subscribe", input: [string, string], result: LobbyCommand }
 };
 
+export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number }
+
 export type RespondOptionalAbility = { code: string; target: FrontendTarget | null; ability_id: string; response: boolean }
+
+export type GameState = { players: { [key: string]: PlayerState }; public_info: PublicGameInfo; status: GameStatus; code: string }
 
 export type ManaType = "White" | "Blue" | "Black" | "Red" | "Green" | "Colorless"
 
 export type TurnPhase = "Untap" | "Upkeep" | "Draw" | "Main" | "BeginningOfCombat" | "DeclareAttackers" | "DeclareBlockers" | "CombatDamage" | "EndOfCombat" | "Main2" | "End" | "Cleanup"
 
-export type CardWithDetails = { card: Card; abilities: AbilityDetails[]; frontend_target: FrontendCardTarget }
-
 export type FrontendPileName = "Hand" | "Play" | "Spell" | "Deck" | "Exiled" | "Graveyard"
+
+export type PlayerStatus = "Spectator" | "Ready" | "InGame"
 
 export type LobbyChatArgs = { lobby_id: string; text: string }
 
 export type RespondCardSelection = { code: string; target: FrontendTarget | null }
 
-export type PublicGameInfo = { current_turn: Turn | null; priority_queue: PriorityQueue | null; attacks: Attack[]; blocks: Block[] }
-
 export type Counter = { PowerToughnessModifier: [number, number] } | { Incremental: number }
 
-export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number }
+export type Attack = { attacker: FrontendCardTarget; target: FrontendTarget }
 
-export type FrontendCardTarget = { player_index: number; pile: FrontendPileName; card_index: number }
+export type PlayerState = { public_info: PublicPlayerInfo; hand: CardWithDetails[]; discard_pile: CardWithDetails[]; status: PlayerStatus; is_leader: boolean; player_index: number; priority_queue: PriorityQueue | null; deck: DeckSelector; sub: string }
 
 export type LobbyTurnMessage = { messages: string[] }
 
 export type CardSelectionDetails = { player_id: string; cards: CardWithDetails[]; valid_card_indexes: number[] }
 
+export type FrontendTarget = { Card: FrontendCardTarget } | { Player: number }
+
 export type LobbyCommand = { Updated: LobbyData } | { Messages: string[] } | { DebugMessage: string } | { TurnMessages: LobbyTurnMessage } | { AskExecuteAbility: ExecuteAbility } | { MandatoryExecuteAbility: ExecuteAbility } | { ChooseFromSelection: CardSelectionDetails }
+
+export type CardTargetTeam = "Owner" | "Opponent" | "Any"
+
+export type Block = { attacker: FrontendCardTarget; blocker: FrontendCardTarget }
 
 export type DeckDetails = { cards: CardWithCount[] }
 
-export type CardRequiredTarget = "None" | "OwnedCard" | "AnyPlayer" | "AnyCard" | "EnemyCard" | "EnemyPlayer" | "EnemyCardOrPlayer" | { CardOfType: [CardType, CardTargetTeam, boolean | null] } | { BasicLand: [CardTargetTeam, boolean | null] } | { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } | "EnemyCardInCombat" | "Spell" | { MultipleCardsOfType: [CardType, number] } | { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] }
+export type CardWithDetails = { card: Card; abilities: AbilityDetails[]; frontend_target: FrontendCardTarget }
 
-export type FrontendTarget = { Card: FrontendCardTarget } | { Player: number }
-
-export type CardTargetTeam = "Owner" | "Opponent" | "Any"
+export type FrontendCardTarget = { player_id: string; pile: FrontendPileName; card_index: number }
 
 export type Turn = { current_player_index: number; phase: TurnPhase; turn_number: number }
 
@@ -66,7 +72,7 @@ export type LobbyChat = { user_id: string; message: string }
 
 export type ManaPool = { white: number; blue: number; black: number; red: number; green: number; colorless: number; played_card: boolean }
 
-export type ActionType = "Tap" | "None" | "Instant" | "Attach" | "PlayedCard"
+export type PublicGameInfo = { current_turn: Turn | null; priority_queue: PriorityQueue | null; attacks: Attack[]; blocks: Block[] }
 
 export type LobbyData = { join_code: string; chat: LobbyChat[]; game_state: GameState }
 
@@ -74,46 +80,40 @@ export type StatManager = { stats: { [key: string]: Stat } }
 
 export type ExecuteAbility = { card: CardWithDetails; details: AbilityDetails; player_id: string }
 
-export type StatType = "Health" | "Power" | "Toughness" | "Trample" | "Lifelink" | "Flying" | "Reach" | "Regenerate" | "Deathtouch" | "Vigilance" | "Counter"
+export type StatType = "Health" | "Power" | "Toughness" | "Trample" | "Lifelink" | "Flying" | "Reach" | "Regenerate" | "Deathtouch" | "Vigilance" | "Counter" | "Haist"
+
+export type DeckSelector = "Elves" | "Elves2" | "Blue" | "Black" | "Angels" | "Red"
 
 export type Stat = { stat_type: StatType; intensity: number }
 
-export type Attack = { attacker: FrontendCardTarget; target: FrontendTarget }
+export type CardRequiredTarget = "None" | "OwnedCard" | "AnyPlayer" | "AnyCard" | "EnemyCard" | "EnemyPlayer" | "EnemyCardOrPlayer" | { CardOfType: [CardType, CardTargetTeam, boolean | null] } | { BasicLand: [CardTargetTeam, boolean | null] } | { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } | "EnemyCardInCombat" | "Spell" | { MultipleCardsOfType: [CardType, number] } | { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] }
 
 export type ActionCardArgs = { trigger_id: string; code: string; card: FrontendCardTarget; target: FrontendTarget | null }
+
+export type GameStatus = "NeedsPlayers" | "InGame" | { WaitingForStart: number }
 
 export type RespondMandatoryAbility = { code: string; target: FrontendTarget | null; ability_id: string }
 
 export type AbilityDetails = { mana_cost: ManaType[]; required_target: CardRequiredTarget; description: string; action_type: ActionType; show: boolean; id: string; meets_requirements_except_mana: boolean; meets_mana_requirements: boolean; can_pay_mana: boolean; owner_player_id: string | null }
 
-export type DeckSelector = "Elves" | "Elves2" | "Blue" | "Black" | "Angels" | "Red"
-
-export type Block = { attacker: FrontendCardTarget; blocker: FrontendCardTarget }
-
 export type CreatureType = "None" | "Angel" | "Elf"
+
+export type ActionType = "Tap" | "None" | "Instant" | "Attach" | "PlayedCard"
 
 export type CardWithCount = { card: CardWithDetails; count: number }
 
 export type LoginArgs = { username: string; password: string }
 
-export type PlayerStatus = "Spectator" | "Ready" | "InGame"
-
 export type AuthResponse = { access_token: string | null; refresh_token: string | null; success: boolean }
 
 export type SelectDeckArgs = { code: string; deck: DeckSelector }
 
-export type GameStatus = "NeedsPlayers" | "InGame" | { WaitingForStart: number }
+export type PriorityQueue = { player_id: string; time_left: number }
 
 export type Card = { creature_type: CreatureType | null; name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; stats: StatManager; cost: ManaType[]; is_countered: boolean; id: string; counters: { [key: string]: Counter } }
 
-export type PriorityQueue = { player_index: number; time_left: number }
-
-export type PlayerState = { public_info: PublicPlayerInfo; hand: CardWithDetails[]; discard_pile: CardWithDetails[]; status: PlayerStatus; is_leader: boolean; player_index: number; priority_queue: PriorityQueue | null; deck: DeckSelector; sub: string }
-
-export type CardType = "Creature" | "Plainswalker" | "Enchantment" | "Instant" | "Sorcery" | "Artifact" | { BasicLand: ManaType } | { AdvancedLand: ManaType } | { AdvancedMultiLand: [ManaType, ManaType] }
+export type CardType = "Creature" | "Planeswalker" | "Enchantment" | "Instant" | "Sorcery" | "Artifact" | { BasicLand: ManaType } | { AdvancedLand: ManaType } | { AdvancedMultiLand: [ManaType, ManaType] }
 
 export type CardPhase = { Charging: number } | "Ready" | "Complete" | "Cancelled" | "Exiled"
-
-export type GameState = { players: { [key: string]: PlayerState }; public_info: PublicGameInfo; status: GameStatus; code: string }
 
 export type PlayCardArgs = { code: string; in_hand_index: number; target: FrontendTarget | null }

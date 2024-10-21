@@ -63,37 +63,44 @@
 </script>
 
 <div class="min-h-[calc(100vh-3rem)] flex flex-col w-full">
-	<div class="flex-grow flex">
-		<div class="container !px-3">
-			<div class="h-24 flex items-center grid grid-cols-8 w-full">
-				{#if isMyTurn}
-					<Button on:click={turn}>
-						Advance turn
-						<ArrowBigRight class="pl-1" />
-					</Button>
-				{/if}
+	<div
+		class="flex sticky top-12 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
+	>
+		<div class="container !px-3 pb-6">
+			<div class="h-24 flex items-center w-full min-w-full">
 				<PriorityQueueNotification {turnMessage} game={game_state}></PriorityQueueNotification>
-				{#if game_state.public_info.current_turn}
-					<div class="col-span-3 text-right">
-						Turn #{game_state.public_info.current_turn.turn_number},
-						{currentPlayer(game_state.public_info)}'s
-						{game_state.public_info.current_turn.phase}
-					</div>
-				{/if}
 			</div>
-
-			<div class="space-y-3">
-				{#each Object.keys(game_state.players) as key}
-					{@const player = game_state.players[key]}
-					<Player code={join_code} game={game_state} {player} playerName={key} />
-				{/each}
-			</div>
+			{#if game_state.public_info.current_turn}
+				<div class="text-center">
+					Turn #{game_state.public_info.current_turn.turn_number},
+					{currentPlayer(game_state.public_info)}'s
+					{game_state.public_info.current_turn.phase}
+				</div>
+			{/if}
+		</div>
+	</div>
+	<div class="w-full flex-grow !px-3">
+		<div class="grid grid-cols-2 gap-3">
+			{#each Object.keys(game_state.players) as key}
+				{@const player = game_state.players[key]}
+				<Player code={join_code} game={game_state} {player} playerName={key} />
+			{/each}
 		</div>
 	</div>
 
-	<div class="z-50 sticky bottom-0 left-0 right-0 bg-gray-100 dark:bg-gray-950 border-t mt-4">
-		<div class="container !px-3 relative flex mx-auto py-2">
-			<div class="grid gap-2 grid-cols-6">
+	<div class="z-50 sticky bottom-0 left-0 right-0">
+		<div class="container !px-3 mx-auto pt-2 flex items-center">
+			{#if isMyTurn}
+				<Button
+					class="ml-auto h-12 text-2xl  tracking-tight  font-medium rounded-full"
+					on:click={turn}
+				>
+					<ArrowBigRight size={28} />
+				</Button>
+			{/if}
+		</div>
+		<div class="!px-3 mx-auto py-2 w-full bg-gray-100 dark:bg-gray-950 border-t mt-4">
+			<div class="flex flex-wrap gap-1 justify-center w-full">
 				{#each self.hand as card, i}
 					<CCard on:click={() => playCard(i)} game={game_state} cardWithDetails={card}></CCard>
 				{/each}

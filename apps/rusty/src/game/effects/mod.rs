@@ -5,7 +5,7 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 use super::{
-    action::{ActionTriggerType, CardAction, CardActionTarget},
+    action::{ActionTriggerType, CardAction, CardActionTarget, CardActionTrigger},
     card::{Card, CardType, CreatureType},
     player::Player,
     stat::{Stat, StatType, Stats},
@@ -170,7 +170,108 @@ impl fmt::Debug for EffectManager {
 #[derive(Debug)]
 pub enum ExpireContract {
     Turns(i16),
+    Steps(i16),
     Never,
+}
+
+#[derive(Debug)]
+pub struct AddTriggerEffect {
+    pub target: Arc<Mutex<Card>>,
+    pub expires: ExpireContract,
+    pub id: EffectID,
+    pub applied: bool,
+    pub trigger: CardActionTrigger,
+    pub source_card: Option<Arc<Mutex<Card>>>,
+    pub previous_turn: Option<i32>,
+    pub game: Arc<Mutex<Game>>,
+    pub target_trigger_index: Option<usize>,
+    pub previous_step: Option<TurnPhase>,
+}
+
+impl AddTriggerEffect {
+    pub fn new(
+        target: Arc<Mutex<Card>>,
+        expires: ExpireContract,
+        source_card: Option<Arc<Mutex<Card>>>,
+        trigger: CardActionTrigger,
+        game: Arc<Mutex<Game>>,
+    ) -> AddTriggerEffect {
+        AddTriggerEffect {
+            target,
+            source_card,
+            trigger,
+            expires,
+            id: EffectID::new(),
+            applied: false,
+            previous_turn: None,
+            previous_step: None,
+            game,
+            target_trigger_index: None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Effect for AddTriggerEffect {
+    fn get_source_card(&self) -> Option<&Arc<Mutex<Card>>> {
+        self.source_card.as_ref()
+    }
+    async fn apply(&mut self, turn: Turn) {
+        println!("WE CALLED APPLY ON TRIGGER EFFECT FOR TURN {:?}", turn);
+        if !self.applied {
+            // let mut card = card_arc.lock().await;
+            // card.mark_exiled();
+            self.target.lock().await.triggers.push(self.trigger.clone());
+            self.target_trigger_index = Some(self.target.lock().await.triggers.len() - 1);
+            self.applied = true;
+        }
+
+        // Decrement duration if applicable
+        match &mut self.expires {
+            ExpireContract::Steps(remaining) => {
+                if let Some(prev) = self.previous_step {
+                    if prev != turn.phase && *remaining > 0 {
+                        *remaining -= 1;
+                    }
+                }
+                self.previous_step = Some(turn.phase);
+            }
+            ExpireContract::Turns(remaining) => {
+                if let Some(prev) = self.previous_turn {
+                    if prev != turn.turn_number && *remaining > 0 {
+                        *remaining -= 1;
+                    }
+                } else {
+                    self.previous_turn = Some(turn.turn_number);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        // Decrement duration if applicable
+        match &self.expires {
+            ExpireContract::Turns(remaining) => *remaining == 0,
+            ExpireContract::Steps(remaining) => *remaining == 0,
+            _ => false,
+        }
+    }
+
+    async fn cleanup(&mut self) {
+        self.previous_step = None;
+        if let Some(index) = self.target_trigger_index {
+            let triggers_len = self.target.lock().await.triggers.len();
+            if triggers_len > index {
+                self.target.lock().await.triggers.remove(index);
+                self.target_trigger_index = None;
+            }
+        }
+    }
+
+    fn get_id(&self) -> &EffectID {
+        &self.id
+    }
 }
 
 #[derive(Debug)]
@@ -303,13 +404,15 @@ impl Effect for StatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     card.stats
-                        .add_stat(id, Stat::new(self.stat_type, self.amount));
+                        .add_stat(id, Stat::new(self.stat_type, self.amount))
+                        .await;
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
                     player
                         .stat_manager
-                        .add_stat(id, Stat::new(self.stat_type, self.amount));
+                        .add_stat(id, Stat::new(self.stat_type, self.amount))
+                        .await;
                 }
                 EffectTarget::CardId(id) => todo!(),
             }
@@ -345,11 +448,11 @@ impl Effect for StatModifierEffect {
         match &self.target {
             EffectTarget::Card(card_arc) => {
                 let mut card = card_arc.lock().await;
-                card.stats.remove_stat(id_str);
+                card.stats.remove_stat(id_str).await;
             }
             EffectTarget::Player(player_arc) => {
                 let mut player = player_arc.lock().await;
-                player.stat_manager.remove_stat(id_str);
+                player.stat_manager.remove_stat(id_str).await;
             }
             EffectTarget::CardId(_) => todo!(),
         }
@@ -439,11 +542,11 @@ impl Effect for DynamicStatModifierEffect {
             match &self.target {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
-                    card.stats.remove_stat(id_str);
+                    card.stats.remove_stat(id_str).await;
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
-                    player.stat_manager.remove_stat(id_str);
+                    player.stat_manager.remove_stat(id_str).await;
                 }
                 EffectTarget::CardId(_) => todo!(),
             }

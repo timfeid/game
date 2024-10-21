@@ -61,14 +61,7 @@ impl Lobby {
             let game = cloned_game.lock().await;
             if let Some((player, time_left, _)) = &game.current_priority_player {
                 Some(PriorityQueue {
-                    player_index: self
-                        .data
-                        .game_state
-                        .players
-                        .values()
-                        .find(|x| Arc::ptr_eq(&x.player, player))
-                        .unwrap()
-                        .player_index,
+                    player_id: player.lock().await.name.clone(),
                     time_left: time_left.clone(),
                 })
             } else {
@@ -95,14 +88,16 @@ impl Lobby {
             let cloned_game = self.cloned_game().await;
             let game = cloned_game.lock().await;
             if let Some(turn) = game.current_turn.clone() {
-                let player = turn.current_player;
-                for (index, card) in player.lock().await.cards_in_play.iter().enumerate() {
+                let player = &turn.current_player;
+                let player_id = turn.current_player.lock().await.name.clone();
+                let cards = player.lock().await.cards_in_play.clone();
+                for (index, card) in cards.iter().enumerate() {
                     for (attacker, target) in game.combat.attackers.iter() {
                         if Arc::ptr_eq(attacker, card) {
                             attacks.push(Attack {
                                 target: game.frontend_target_from_effect_target(target).await,
                                 attacker: FrontendCardTarget {
-                                    player_index: turn.current_player_index,
+                                    player_id: player_id.clone(),
                                     pile: FrontendPileName::Play,
                                     card_index: index as i32,
                                 },
@@ -278,19 +273,30 @@ impl Lobby {
 
     pub async fn attach_card(
         &mut self,
-        player_index: usize,
+        player_id: String,
         in_play_index: usize,
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let player = Arc::clone(&self.game.lock().await.players[player_index]);
+        // let player = Arc::clone(&self.game.lock().await.players[player_index]);
+        let mut player = None;
 
-        self.game
-            .lock()
-            .await
-            .attach_card_action(&player, in_play_index, target)
-            .await
-            .map_err(|x| AppError::BadRequest(x))?;
+        let players = self.game.lock().await.players.clone();
+
+        for current_player in players {
+            if current_player.lock().await.name == player_id {
+                player = Some(current_player);
+                break;
+            }
+        }
+        if let Some(player) = player {
+            self.game
+                .lock()
+                .await
+                .attach_card_action(&player, in_play_index, target)
+                .await
+                .map_err(|x| AppError::BadRequest(x))?;
+        }
 
         Ok(())
     }
@@ -341,12 +347,17 @@ impl Lobby {
         trigger_id: String,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let player =
-            Arc::clone(&self.game.lock().await.players[frontend_card.player_index as usize]);
-
-        Game::activate_card_action(&self.game, &player, frontend_card, target, trigger_id)
-            .await
-            .map_err(|x| AppError::BadRequest(x))?;
+        let mut player;
+        let players = self.game.lock().await.players.clone();
+        for (index, current_player) in players.iter().enumerate() {
+            if current_player.lock().await.name == frontend_card.player_id {
+                player = Arc::clone(current_player);
+                Game::activate_card_action(&self.game, &player, frontend_card, target, trigger_id)
+                    .await
+                    .map_err(|x| AppError::BadRequest(x))?;
+                break;
+            }
+        }
 
         Ok(())
     }

@@ -5,7 +5,7 @@
 	import { mandatoryAbility } from '../../../stores/dialog';
 	import { waitForTarget } from '../game';
 	import * as AlertDialog from '../../ui/alert-dialog';
-	import ManaBubble from '../mana-bubble.svelte';
+	import ManaBubble from '../mana-bubble/mana-bubble.svelte';
 
 	let ability: ExecuteAbility | undefined = undefined;
 	export let game: GameState;

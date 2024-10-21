@@ -16,7 +16,7 @@
 	import { user } from '../../stores/access-token';
 	import CCard from './Card.svelte';
 	import { searchingForTarget, target, waitForTarget } from './game';
-	import ManaBubble from './mana-bubble.svelte';
+	import ManaBubble from './mana-bubble/mana-bubble.svelte';
 	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
 
 	export let game: GameState;
@@ -37,8 +37,7 @@
 				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
 				{
 					code,
-					player_index: player.player_index,
-					in_play_index: index,
+					card: card.frontend_target,
 					target,
 					trigger_id: ability.id
 				}
@@ -86,7 +85,7 @@
 		console.log(self);
 		if ($searchingForTarget) {
 			console.log('set target.');
-			target.set({ Card: { player_index: player.player_index, card_index: index, pile: 'Spell' } });
+			target.set({ Card: { player_id: player.sub, card_index: index, pile: 'Spell' } });
 			return;
 		}
 		const card = player.public_info.cards_in_play[index];
@@ -148,14 +147,14 @@
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type !== 'string'}
-					<CCard {game} on:click={() => actionCard(i)} cardWithDetails={card}></CCard>
+					<CCard {game} cardWithDetails={card}></CCard>
 				{/if}
 			{/each}
 		</div>
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type === 'string'}
-					<CCard {game} on:click={() => actionCard(i)} cardWithDetails={card}></CCard>
+					<CCard {game} cardWithDetails={card}></CCard>
 				{/if}
 			{/each}
 			{#each player.public_info.spells as card, i}

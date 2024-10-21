@@ -13,7 +13,7 @@ use crate::game::{
     },
     effects::{
         DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract,
-        StatModifierEffect,
+        ModifyStatTarget, StatModifierEffect,
     },
     mana::ManaType,
     player::Player,
@@ -137,24 +137,24 @@ fn create_plains() -> Card {
 pub fn create_angels_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
     // deck.push();
-    // deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
-    // deck.append(&mut duplicate_card(create_bishop_of_wings(), 4));
-    // deck.append(&mut duplicate_card(create_giada_font_of_hope(), 4));
-    // deck.append(&mut duplicate_card(create_skyclave_cleric(), 1));
-    // deck.append(&mut duplicate_card(create_youthful_valkyrie(), 4));
-    // deck.append(&mut duplicate_card(create_metropolis_reformer(), 2));
-    // deck.append(&mut duplicate_card(create_resplendent_angel(), 4));
-    // deck.append(&mut duplicate_card(create_righteous_valkyrie(), 4));
-    // deck.append(&mut duplicate_card(create_ossification(), 2));
-    // deck.append(&mut duplicate_card(create_ajani_strength_of_the_pride(), 1));
-    // deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
-    // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
-    // deck.append(&mut duplicate_card(create_plains(), 22));
-
-    deck.append(&mut duplicate_card(create_test_plains(), 1));
-    deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
+    deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
+    deck.append(&mut duplicate_card(create_bishop_of_wings(), 4));
+    deck.append(&mut duplicate_card(create_giada_font_of_hope(), 4));
+    deck.append(&mut duplicate_card(create_skyclave_cleric(), 1));
+    deck.append(&mut duplicate_card(create_youthful_valkyrie(), 4));
+    deck.append(&mut duplicate_card(create_metropolis_reformer(), 2));
+    deck.append(&mut duplicate_card(create_resplendent_angel(), 4));
+    deck.append(&mut duplicate_card(create_righteous_valkyrie(), 4));
+    deck.append(&mut duplicate_card(create_ossification(), 2));
     deck.append(&mut duplicate_card(create_ajani_strength_of_the_pride(), 1));
     deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
+    deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
+    deck.append(&mut duplicate_card(create_plains(), 22));
+
+    // deck.append(&mut duplicate_card(create_test_plains(), 1));
+    // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
+    // deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
+    // deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
 
     deck
 }
@@ -334,11 +334,10 @@ pub fn create_skyclave_cleric() -> Card {
                  source: Arc<Mutex<Card>>|
                  -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
-                        let id =
-                            format!("{}-{}", source.lock().await.name, Ulid::new().to_string());
-
-                        if let Some(owner) = source.lock().await.owner.as_ref() {
-                            game.lock().await.add_health(owner, 2).await;
+                        let owner = source.lock().await.owner.clone();
+                        if let Some(owner) = owner {
+                            println!("adding health...");
+                            game.lock().await.add_health(&owner, 2).await;
                         }
                         Ok(())
                     })
@@ -500,19 +499,22 @@ pub fn create_serra_ascendant() -> Card {
                             let id = format!("{}-{}-{}-damage", card.lock().await.id, id, name);
                             effect.id = EffectID(id.clone());
 
-                            effects.push(Arc::new(Mutex::new(effect)));
-                            let mut effect = DynamicStatModifierEffect::new(
-                                EffectTarget::Card(card.clone()),
-                                StatType::Flying,
-                                amount.clone(),
-                                ExpireContract::Never,
-                                Some(card.clone()),
-                                false,
-                            );
+                            let total = (amount)(card.clone()).await;
+                            if total > 0 {
+                                effects.push(Arc::new(Mutex::new(effect)));
+                                let mut effect = StatModifierEffect::new(
+                                    EffectTarget::Card(card.clone()),
+                                    StatType::Flying,
+                                    1,
+                                    ExpireContract::Never,
+                                    Some(card.clone()),
+                                );
 
-                            let id = format!("{}-{}-{}-flying", card.lock().await.id, id, name);
-                            effect.id = EffectID(id.clone());
-                            effects.push(Arc::new(Mutex::new(effect)));
+                                let id = format!("{}-{}-{}-flying", card.lock().await.id, id, name);
+                                effect.id = EffectID(id.clone());
+                                effects.push(Arc::new(Mutex::new(effect)));
+                            }
+
                             let mut effect = DynamicStatModifierEffect::new(
                                 EffectTarget::Card(card.clone()),
                                 StatType::Toughness,
@@ -526,6 +528,7 @@ pub fn create_serra_ascendant() -> Card {
                             effect.id = EffectID(id.clone());
                             effects.push(Arc::new(Mutex::new(effect)));
 
+                            println!("Applying effects! {:?}", effects);
                             effects
                         })
                     },
@@ -562,6 +565,7 @@ pub fn create_youthful_valkyrie() -> Card {
                             )
                             .await;
                         }
+                        println!("done");
                         Ok(())
                     })
                 }
@@ -707,10 +711,14 @@ fn create_lunarch_veteran() -> Card {
                  card_played: Arc<Mutex<Card>>|
                  -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
-                        let card = card_played.lock().await;
-                        let owner = card.owner.clone().unwrap();
+                        let (owner, card_type) = {
+                            let card = card_played.lock().await;
+                            let owner = card.owner.clone().unwrap();
+                            let card_type = card.card_type.clone();
+                            (owner, card_type)
+                        };
 
-                        if card.card_type == CardType::Creature {
+                        if card_type == CardType::Creature {
                             game.lock().await.add_health(&owner, 1).await;
                         }
                         Ok(())
@@ -878,13 +886,18 @@ fn create_bishop_of_wings() -> Card {
             Arc::new(AsyncClosureWithCardAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>, source: Arc<Mutex<Card>>, card_played: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
-                        let card = card_played.lock().await;
-                        let owner = card.owner.clone().unwrap();
+                        let (owner, creature_type) = {
+                            let card = card_played.lock().await;
+                            let owner = card.owner.clone().unwrap();
+                            let creature_type = card.creature_type.clone();
+                            (owner, creature_type)
+                        };
 
-                        if card.creature_type == Some(CreatureType::Angel) {
+                        if creature_type == Some(CreatureType::Angel) {
                             game.lock().await.add_health(&owner, 4).await;
                         }
                         Ok(())
+
                     })
                 }
             )))
@@ -925,7 +938,7 @@ fn create_ajani_strength_of_the_pride() -> Card {
                                     > {
                                         Box::pin(async move {
                                             if let Ok(card) = card_arc.try_lock() {
-                                                vec![CardType::Creature, CardType::Plainswalker].contains(&card.card_type)
+                                                vec![CardType::Creature, CardType::Planeswalker].contains(&card.card_type)
                                             } else {
                                                 false
                                             }
@@ -959,7 +972,7 @@ fn create_ajani_strength_of_the_pride() -> Card {
                 ActionTriggerType::AbilityWithinPhases(
                     "[−2]: Create a 2/2 white Cat Soldier creature token named Ajani's Pridemate with \"Whenever you gain life, put a +1/+1 counter on Ajani's Pridemate.\"".to_string(),
                     vec![],
-                    None,
+                    Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner)),
                     false,
                 ),
                 CardRequiredTarget::None,
@@ -1052,7 +1065,7 @@ fn create_ajani_strength_of_the_pride() -> Card {
             ),
         ],
         CardPhase::Ready,
-        CardType::Plainswalker,
+        CardType::Planeswalker,
         vec![Stat::new(StatType::Counter, 5)],
         vec![
             ManaType::Colorless,
@@ -1136,8 +1149,6 @@ fn create_righteous_valkyrie() -> Card {
                                         let id = format!("{}-{}-{}-defense",card.lock().await.id, id, name);
                                         effect.id = EffectID(id.clone());
                                         effects.push(Arc::new(Mutex::new(effect)));
-                                    } else {
-                                        println!("{} is skipping {}, not right type", name, card.lock().await.name);
                                     }
                                 }
                             }
@@ -1156,13 +1167,18 @@ fn create_righteous_valkyrie() -> Card {
             Arc::new(AsyncClosureWithCardAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>, source: Arc<Mutex<Card>>, card_played: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
-                        let card = card_played.lock().await;
-                        let owner_arc = card.owner.clone().unwrap();
 
-                        if card.creature_type == Some(CreatureType::Angel) {
+                        let (owner, creature_type, toughness) = {
+                            let card = card_played.lock().await;
+                            let owner = card.owner.clone().unwrap();
+                            let creature_type = card.creature_type.clone();
                             let toughness = card.get_stat_value(StatType::Toughness);
+                            (owner, creature_type, toughness)
+                        };
 
-                            game.lock().await.add_health(&owner_arc, toughness).await;
+                        if creature_type == Some(CreatureType::Angel) {
+
+                            game.lock().await.add_health(&owner, toughness).await;
                         }
                         Ok(())
                     })

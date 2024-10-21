@@ -41,7 +41,7 @@ pub enum CreatureType {
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Type)]
 pub enum CardType {
     Creature,
-    Plainswalker,
+    Planeswalker,
     Enchantment,
     Instant,
     Sorcery,
@@ -222,11 +222,6 @@ impl Card {
             })
             .count()
             > 0;
-
-        println!(
-            "has_triggers: {:?}\nhas_effects: {}\n\n\n",
-            has_triggers, has_effects
-        );
 
         !has_triggers && !has_effects
     }
@@ -621,7 +616,7 @@ pub mod card {
             cards
         }};
     }
-    macro_rules! create_plainswalker_card {
+    macro_rules! create_planeswalker_card {
         // Base case with additional stats
         ($name:expr, $creature_type:expr, $description:expr, $damage:expr, $defense:expr, [$($mana:expr),*], [$($stat:expr),*] $(, $additional_triggers:expr)*) => {
             {
@@ -739,5 +734,5 @@ pub mod card {
 
     pub(crate) use create_creature_card;
     pub(crate) use create_multiple_cards;
-    pub(crate) use create_plainswalker_card;
+    pub(crate) use create_planeswalker_card;
 }

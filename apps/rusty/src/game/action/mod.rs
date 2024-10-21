@@ -171,28 +171,6 @@ impl CardAction for ResetCardAction {
 }
 
 #[derive(Debug)]
-pub struct CardStatChangedAction {
-    pub game: Arc<Mutex<Game>>,
-    pub card: Arc<Mutex<Card>>,
-}
-
-#[async_trait::async_trait]
-impl Action for CardStatChangedAction {
-    async fn apply(&self, game: &mut Game) -> Result<(), String> {
-        let mut actions = {
-            let more_actions = game.collect_card_stat_changed_actions(&self.card).await;
-            more_actions
-        };
-
-        println!("card stat changed actions? {:?}", actions);
-
-        game.execute_actions(&mut actions).await?;
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
 pub struct PlayCardAction {
     pub player_arc: Arc<Mutex<Player>>,
     pub card_arc: Arc<Mutex<Card>>,
@@ -736,6 +714,14 @@ impl Action for CardActionWrapper {
     async fn apply(&self, game: &mut Game) -> Result<(), String> {
         let card = Arc::clone(&self.card);
 
+        self.action
+            .apply(
+                game,
+                card.clone(),
+                self.target.clone().unwrap_or(EffectTarget::Card(card)),
+                self.ability_id.clone(),
+            )
+            .await?;
         if let Some(ability_id) = &self.ability_id {
             let count = game
                 .triggers_played_this_turn
@@ -749,15 +735,7 @@ impl Action for CardActionWrapper {
             game.triggers_played_this_turn
                 .insert(ability_id.clone(), count + 1);
         }
-
-        self.action
-            .apply(
-                game,
-                card.clone(),
-                self.target.clone().unwrap_or(EffectTarget::Card(card)),
-                self.ability_id.clone(),
-            )
-            .await
+        Ok(())
     }
 }
 
@@ -894,10 +872,12 @@ impl CardAction for CardDamageAction {
                 let defense = stats.get_stat_value(StatType::Toughness);
                 let total = offense - defense;
                 println!("Do damage {} to {:?}", total, stats);
-                stats.add_stat(
-                    Ulid::new().to_string(),
-                    Stat::new(StatType::Health, -1 * total),
-                );
+                stats
+                    .add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Health, -1 * total),
+                    )
+                    .await;
             }
             _ => todo!(),
         };
@@ -1450,9 +1430,9 @@ impl CardAction for ApplyEffectsToPlayerCreatureType {
                     )
                     .await;
                     for effect in effects {
-                        let effect_id = effect.lock().await.get_final_id();
                         // println!("received effect from list {:?}", effect_id);
 
+                        let effect_id = effect.as_ref().lock().await.get_final_id().clone();
                         game.effect_manager.add_effect(effect_id, effect);
                     }
                 } else {
@@ -1799,8 +1779,7 @@ impl CastOptionalAdditionalAbility {
         action_type: ActionType,
     ) -> CastOptionalAdditionalAbility {
         let canceled = Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-            Arc::new(DrawCardCardAction::one(CardActionTarget::SelfOwner))
-                as Arc<dyn CardAction + Send + Sync>
+            Arc::new(BlankAction {}) as Arc<dyn CardAction + Send + Sync>
         });
         CastOptionalAdditionalAbility {
             mana,

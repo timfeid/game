@@ -11,7 +11,7 @@
 		ManaType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
-	import ManaBubble from './mana-bubble.svelte';
+	import ManaBubble from './mana-bubble/mana-bubble.svelte';
 	import Ability from './card/ability.svelte';
 	import { searchingForTarget, target, waitForTarget } from './game';
 	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
@@ -19,6 +19,7 @@
 	import { toast } from 'svelte-sonner';
 	import { client } from '../../client';
 	import { RSPCError } from '@rspc/client';
+	import ManaBubbleList from './mana-bubble/mana-bubble-list.svelte';
 
 	export let cardWithDetails: CardWithDetails;
 	export let game: GameState | undefined = undefined;
@@ -123,11 +124,11 @@
 			target.set({ Card: cardWithDetails.frontend_target });
 			return;
 		}
-		const player = Object.values(game?.players || {}).find(
-			(p) => p.player_index === cardWithDetails.frontend_target.player_index
-		);
-		if (player && game) {
-			if ($user?.sub === player.sub) {
+		if (noTooltips) {
+			return;
+		}
+		if (game) {
+			if ($user?.sub === cardWithDetails.frontend_target.player_id) {
 				try {
 					console.log(cardWithDetails.abilities);
 					const ability = await selectAbility(cardWithDetails);
@@ -170,6 +171,8 @@
 			toast.error('Unknown error!');
 		}
 	}
+
+	$: shownAbilities = cardWithDetails.abilities.filter((a) => a.show);
 </script>
 
 <button
@@ -179,7 +182,7 @@
 	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
-	data-player-index={cardWithDetails.frontend_target.player_index}
+	data-player-id={cardWithDetails.frontend_target.player_id}
 	in:fly={{ y: '-300%', duration: 500 }}
 >
 	<div
@@ -187,7 +190,7 @@
 			(a) =>
 				a.blocker.card_index === cardWithDetails.frontend_target.card_index &&
 				a.blocker.pile === cardWithDetails.frontend_target.pile &&
-				a.blocker.player_index === cardWithDetails.frontend_target.player_index
+				a.blocker.player_id === cardWithDetails.frontend_target.player_id
 		)}
 	></div>
 	<div
@@ -195,7 +198,7 @@
 			(a) =>
 				a.attacker.card_index === cardWithDetails.frontend_target.card_index &&
 				a.attacker.pile === cardWithDetails.frontend_target.pile &&
-				a.attacker.player_index === cardWithDetails.frontend_target.player_index
+				a.attacker.player_id === cardWithDetails.frontend_target.player_id
 		)}
 	></div>
 	<div
@@ -217,11 +220,7 @@
 			<h2 class="text-xs leading-6 font-bold truncate">
 				{card.name}
 			</h2>
-			<div class="absolute flex space-x-0.5 top-2 right-2">
-				{#each card.cost as color}
-					<ManaBubble {color} />
-				{/each}
-			</div>
+			<ManaBubbleList mana={card.cost} />
 		</div>
 
 		<div class="card-type mb-2 flex w-full py-0.5 px-2 font-mono">
@@ -241,7 +240,7 @@
 				<div class="ml-auto">
 					{damage}/{defense}
 				</div>
-			{:else if card.card_type === 'Plainswalker'}
+			{:else if card.card_type === 'Planeswalker'}
 				<div class="ml-auto">
 					{Object.values(card.stats.stats).find((x) => x.stat_type === 'Counter')?.intensity}
 				</div>
@@ -263,18 +262,20 @@
 		</div>
 
 		<div class="text-left mb-6 px-2">
-			<p class="text-gray-700 dark:text-gray-300 line-clamp-6 mb-1.5">{card.description}</p>
-			<div class="space-y-1.5">
-				{#each cardWithDetails.abilities as ability}
-					{#if ability.show}
+			{#if card.description}
+				<p class="text-gray-700 dark:text-gray-300 line-clamp-6 mb-1.5">{card.description}</p>
+			{/if}
+			{#if shownAbilities.length > 0}
+				<div class="space-y-1.5">
+					{#each shownAbilities as ability, i}
 						<Ability
 							{noTooltips}
 							inHand={cardWithDetails.frontend_target.pile === 'Hand'}
 							{ability}
 						/>
-					{/if}
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
 			{#if card.card_type === 'Creature' && Object.values(card.counters).length > 0}
 				<div class=" text-muted">Counters</div>
 				<div class="flex space-x-2">

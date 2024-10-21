@@ -287,11 +287,7 @@ impl LobbyManager {
             lobby
                 .lock()
                 .await
-                .attach_card(
-                    args.card.player_index as usize,
-                    args.card.card_index as usize,
-                    target,
-                )
+                .attach_card(args.card.player_id, args.card.card_index as usize, target)
                 .await?;
             println!("attached card, notifying lobby");
         }

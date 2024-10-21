@@ -31,7 +31,7 @@ impl CardAction for CardAddStatAction {
     ) -> Result<(), String> {
         println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;
-        card.add_stat(self.id.clone(), self.stat.clone());
+        card.add_stat(self.id.clone(), self.stat.clone()).await;
         Ok(())
     }
 }

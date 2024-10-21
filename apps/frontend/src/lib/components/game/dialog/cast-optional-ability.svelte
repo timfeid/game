@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import ManaBubble from '../mana-bubble.svelte';
+	import ManaBubble from '../mana-bubble/mana-bubble.svelte';
 	import { askOptionalAbility } from '../../../stores/dialog';
 	import { onMount } from 'svelte';
 	import type { ExecuteAbility, GameState } from '@gangsta/rusty';

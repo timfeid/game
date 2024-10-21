@@ -33,6 +33,8 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
+use super::green_a::create_tyvar_kell;
+
 fn create_test_forest() -> Card {
     Card::new(
         "Forest",
@@ -232,68 +234,57 @@ pub fn create_elvish_warmaster() -> Card {
                 false,
             ),
             CardRequiredTarget::None,
-            Arc::new(ApplyEffectsToPlayerCreatureType::new(
-                CreatureType::Elf,
-                Arc::new(
-                    move |target,
-                          source_card,
-                          effect_id|
-                          -> Pin<
-                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
-                    > {
-                        Box::pin(async move {
-                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                            if let EffectTarget::Card(card) = &target {
-                                if !Arc::ptr_eq(card, &source_card) {
-                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                        target: target.clone(),
-                                        stat_type: StatType::Deathtouch,
-                                        amount: 1,
-                                        expires: ExpireContract::Turns(1),
-                                        id: EffectID(format!(
-                                            "{}-{}-deathtouch",
-                                            source_card.clone().lock().await.id,
-                                            effect_id
-                                        )),
-                                        applied: false,
-                                        source_card: Some(source_card.clone()),
-                                        previous_turn: None,
-                                    })));
-                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                        target: target.clone(),
-                                        stat_type: StatType::Power,
-                                        amount: 2,
-                                        expires: ExpireContract::Turns(1),
-                                        id: EffectID(format!(
-                                            "{}-{}-power",
-                                            source_card.clone().lock().await.id,
-                                            effect_id
-                                        )),
-                                        applied: false,
-                                        source_card: Some(source_card.clone()),
-                                        previous_turn: None,
-                                    })));
-                                    effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                        target: target.clone(),
-                                        stat_type: StatType::Toughness,
-                                        amount: 2,
-                                        expires: ExpireContract::Turns(1),
-                                        id: EffectID(format!(
-                                            "{}-{}-toughness",
-                                            source_card.clone().lock().await.id,
-                                            effect_id
-                                        )),
-                                        applied: false,
-                                        source_card: Some(source_card.clone()),
-                                        previous_turn: None,
-                                    })));
-                                }
+            Arc::new(AsyncClosureAction::new(Arc::new(
+                |game, card| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+                    Box::pin(async move {
+                        let card_id = card.lock().await.id.clone();
+                        let (owner, cards_in_play) = {
+                            let card = card.lock().await;
+                            let owner_arc = card.owner.clone().unwrap();
+                            let cards_in_play = owner_arc.lock().await.cards_in_play.clone();
+
+                            (owner_arc.clone(), cards_in_play)
+                        };
+
+                        for card in cards_in_play {
+                            let card_in_play_id = card.lock().await.id.clone();
+                            if card.lock().await.creature_type == Some(CreatureType::Elf) {
+                                let id = EffectID(format!("{}-{}-deathtouch", card_id, card_in_play_id));
+                                game.lock().await.effect_manager.add_effect(id,
+                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                        EffectTarget::Card(card.clone()),
+                                        StatType::Deathtouch,
+                                        1,
+                                        ExpireContract::Turns(1),
+                                        None,
+                                    ))),
+                                );
+                                let id = EffectID(format!("{}-{}-toughness", card_id, card_in_play_id));
+                                game.lock().await.effect_manager.add_effect(id,
+                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                        EffectTarget::Card(card.clone()),
+                                        StatType::Toughness,
+                                        2,
+                                        ExpireContract::Turns(1),
+                                        None,
+                                    ))),
+                                );
+                                let id = EffectID(format!("{}-{}-power", card_id, card_in_play_id));
+                                game.lock().await.effect_manager.add_effect(id,
+                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                        EffectTarget::Card(card.clone()),
+                                        StatType::Power,
+                                        2,
+                                        ExpireContract::Turns(1),
+                                        None,
+                                    ))),
+                                );
                             }
-                            effects
-                        })
-                    },
-                ),
-            )),
+                        }
+                        Ok(())
+                    })
+                }
+            ))),
         ),
 
         CardActionTrigger::new(
@@ -396,15 +387,17 @@ pub fn create_elvish_archdruid() -> Card {
                             let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
                             if let EffectTarget::Card(card) = &target {
                                 if !Arc::ptr_eq(card, &source_card) {
+                                    let card_id = card.lock().await.id.clone();
                                     effects.push(Arc::new(Mutex::new(StatModifierEffect {
                                         target: target.clone(),
                                         stat_type: StatType::Power,
                                         amount: 1,
                                         expires: ExpireContract::Never,
                                         id: EffectID(format!(
-                                            "{}-{}-power",
+                                            "{}-{}-{}-power",
                                             source_card.clone().lock().await.id,
-                                            effect_id
+                                            effect_id,
+                                            card_id,
                                         )),
                                         applied: false,
                                         source_card: Some(source_card.clone()),
@@ -416,9 +409,10 @@ pub fn create_elvish_archdruid() -> Card {
                                         amount: 1,
                                         expires: ExpireContract::Never,
                                         id: EffectID(format!(
-                                            "{}-{}-toughness",
+                                            "{}-{}-{}-toughness",
                                             source_card.clone().lock().await.id,
-                                            effect_id
+                                            effect_id,
+                                            card_id
                                         )),
                                         applied: false,
                                         source_card: Some(source_card.clone()),
@@ -508,7 +502,8 @@ fn regenerate_target_card() -> Arc<AsyncClosureWithCardAction> {
                 card.add_stat(
                     StaticStatId::Regenerate.to_string(),
                     Stat::new(StatType::Regenerate, 1),
-                );
+                )
+                .await;
                 Ok(())
             })
         },
@@ -720,48 +715,54 @@ pub fn create_ezuri() -> Card {
                     > {
                         Box::pin(async move {
                             let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
-                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                target: target.clone(),
-                                stat_type: StatType::Power,
-                                amount: 3,
-                                expires: ExpireContract::Turns(1),
-                                id: EffectID(format!(
-                                    "{}-{}-power",
-                                    source_card.clone().lock().await.id,
-                                    effect_id
-                                )),
-                                applied: false,
-                                source_card: Some(source_card.clone()),
-                                previous_turn: None,
-                            })));
-                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                target: target.clone(),
-                                stat_type: StatType::Toughness,
-                                amount: 3,
-                                expires: ExpireContract::Turns(1),
-                                id: EffectID(format!(
-                                    "{}-{}-toughness",
-                                    source_card.clone().lock().await.id,
-                                    effect_id
-                                )),
-                                applied: false,
-                                source_card: Some(source_card.clone()),
-                                previous_turn: None,
-                            })));
-                            effects.push(Arc::new(Mutex::new(StatModifierEffect {
-                                target: target.clone(),
-                                stat_type: StatType::Trample,
-                                amount: 1,
-                                expires: ExpireContract::Turns(1),
-                                id: EffectID(format!(
-                                    "{}-{}-trample",
-                                    source_card.clone().lock().await.id,
-                                    effect_id
-                                )),
-                                applied: false,
-                                source_card: Some(source_card.clone()),
-                                previous_turn: None,
-                            })));
+                            if let EffectTarget::Card(card) = &target {
+                                let card_id = card.lock().await.id.clone();
+                                effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                    target: target.clone(),
+                                    stat_type: StatType::Power,
+                                    amount: 3,
+                                    expires: ExpireContract::Turns(1),
+                                    id: EffectID(format!(
+                                        "{}-{}-{}-power",
+                                        source_card.clone().lock().await.id,
+                                        effect_id,
+                                        card_id,
+                                    )),
+                                    applied: false,
+                                    source_card: Some(source_card.clone()),
+                                    previous_turn: None,
+                                })));
+                                effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                    target: target.clone(),
+                                    stat_type: StatType::Toughness,
+                                    amount: 3,
+                                    expires: ExpireContract::Turns(1),
+                                    id: EffectID(format!(
+                                        "{}-{}-{}-toughness",
+                                        source_card.clone().lock().await.id,
+                                        effect_id,
+                                        card_id,
+                                    )),
+                                    applied: false,
+                                    source_card: Some(source_card.clone()),
+                                    previous_turn: None,
+                                })));
+                                effects.push(Arc::new(Mutex::new(StatModifierEffect {
+                                    target: target.clone(),
+                                    stat_type: StatType::Trample,
+                                    amount: 1,
+                                    expires: ExpireContract::Turns(1),
+                                    id: EffectID(format!(
+                                        "{}-{}-{}-trample",
+                                        source_card.clone().lock().await.id,
+                                        effect_id,
+                                        card_id,
+                                    )),
+                                    applied: false,
+                                    source_card: Some(source_card.clone()),
+                                    previous_turn: None,
+                                })));
+                            }
                             effects
                         })
                     },
@@ -1056,15 +1057,17 @@ pub fn create_leaf_crowned_visionary() -> Card {
                             let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
                             if let EffectTarget::Card(card) = &target {
                                 if !Arc::ptr_eq(card, &source_card) {
+                                    let card_id = card.lock().await.id.clone();
                                     effects.push(Arc::new(Mutex::new(StatModifierEffect {
                                         target: target.clone(),
                                         stat_type: StatType::Power,
                                         amount: 1,
                                         expires: ExpireContract::Never,
                                         id: EffectID(format!(
-                                            "{}-{}-power",
+                                            "{}-{}-{}-power",
                                             source_card.clone().lock().await.id,
-                                            effect_id
+                                            effect_id,
+                                            card_id,
                                         )),
                                         applied: false,
                                         source_card: Some(source_card.clone()),
@@ -1076,9 +1079,10 @@ pub fn create_leaf_crowned_visionary() -> Card {
                                         amount: 1,
                                         expires: ExpireContract::Never,
                                         id: EffectID(format!(
-                                            "{}-{}-toughness",
+                                            "{}-{}-{}-toughness",
                                             source_card.clone().lock().await.id,
-                                            effect_id
+                                            effect_id,
+                                            card_id
                                         )),
                                         applied: false,
                                         source_card: Some(source_card.clone()),
@@ -1270,46 +1274,14 @@ pub fn create_chord_of_calling() -> Card {
                                                         println!("source????? {:?}", source_card);
                                                         let position = game.lock().await.frontend_target_from_card(&target).await;
                                                         Game::play_card_without_mana(&game, position).await.expect("oh wow we are here?");
-                                                        // let source_card_cloned = source_card.clone();
-                                                        // {
-                                                        //     game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {action:Arc::new(ReturnToHandAction{}), card: source_card_cloned, target: Some(EffectTarget::Card(target)), ability_id: None })]).await;
-                                                        // }
-
-                                                        // game.lock().await.execute_actions(&mut vec![Arc::new(CardActionWrapper {
-                                                        //         ability_id: None,
-                                                        //         card: source_card,
-                                                        //         action: Arc::new(CastMandatoryAdditionalAbility {
-                                                        //             action_type: ActionType::None,
-                                                        //             mana: vec![],
-                                                        //             target: CardRequiredTarget::CreatureOfType(
-                                                        //                 CreatureType::Elf,
-                                                        //                 CardTargetTeam::Owner,
-                                                        //                 Some(true)
-                                                        //             ),
-                                                        //             description: "Untap target creature".to_string(),
-                                                        //             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                                        //                 Arc::new(AsyncClosureWithCardAction::new(Arc::new(
-                                                        //                     |game: Arc<Mutex<Game>>,
-                                                        //                     source_card: Arc<Mutex<Card>>,
-                                                        //                     target: Arc<Mutex<Card>>|
-                                                        //                     -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
-                                                        //                         Box::pin(async move {
-                                                        //                             { target.lock().await.tapped = false; }
-
-                                                        //                         })
-                                                        //                     },
-                                                        //                 )))
-                                                        //             })
-                                                        //         }) ,
-                                                        //         target: None
-                                                        //     })]).await;
+                                                        println!("card played");
                                                         Ok(())
                                                 })
                                             })))
                                             }))),
 
                                         target: None
-                                    })]).await;
+                                    })]).await?;
 
                     // get cards in deck
                     // send
@@ -1439,6 +1411,19 @@ pub fn create_temple_garden() -> Card {
         "As Temple Garden enters, you may pay 2 life. If you don't, it enters tapped.",
         vec![
             CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add {G} or {W} to your mana pool.".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![ManaType::Green],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+            CardActionTrigger::new(
                 ActionTriggerType::CardPlayedFromHand(Some((
                     vec![
                         TurnPhase::Untap,
@@ -1456,24 +1441,6 @@ pub fn create_temple_garden() -> Card {
                     ],
                     TriggerTarget::Owner,
                 ))),
-                CardRequiredTarget::None,
-                Arc::new(BlankAction {}),
-            ),
-            CardActionTrigger::new(
-                ActionTriggerType::AbilityWithinPhases(
-                    "Add {G} or {W} to your mana pool.".to_string(),
-                    vec![],
-                    None,
-                    true,
-                ),
-                CardRequiredTarget::None,
-                Arc::new(GenerateManaAction {
-                    mana_to_add: vec![ManaType::Green],
-                    target: PlayerActionTarget::Owner,
-                }),
-            ),
-            CardActionTrigger::new(
-                ActionTriggerType::CardPlayedFromHand(Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner))),
                 CardRequiredTarget::None,
                 Arc::new(CastOptionalAdditionalAbility {
                     action_type: ActionType::None,
@@ -1512,28 +1479,24 @@ pub fn create_temple_garden() -> Card {
 
 pub fn create_green_deck_v2() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
-    deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 1));
-    deck.append(&mut duplicate_card(create_priest_of_titania(), 4));
-    deck.append(&mut duplicate_card(create_eladamri_korvecdal(), 3));
-
-    deck.append(&mut duplicate_card(create_wirewood(), 2));
-    deck.append(&mut duplicate_card(create_devoted_druid(), 4));
-    deck.append(&mut duplicate_card(create_elvish_archdruid(), 1));
-    deck.append(&mut duplicate_card(create_ezuri(), 2));
-    deck.append(&mut duplicate_card(create_elvish_mystic(), 2));
-    deck.append(&mut duplicate_card(create_heritage_druid(), 4));
-    deck.append(&mut duplicate_card(create_llanowar_elves(), 3));
-    deck.append(&mut duplicate_card(create_elvish_warmaster(), 4));
-    deck.append(&mut duplicate_card(create_quirion_ranger(), 3));
-
+    // deck.append(&mut duplicate_card(create_forest(), 12));
+    // deck.append(&mut duplicate_card(create_pendelhaven(), 2));
+    // deck.append(&mut duplicate_card(create_priest_of_titania(), 4));
+    // deck.append(&mut duplicate_card(create_llanowar_elves(), 4));
+    // deck.append(&mut duplicate_card(create_heritage_druid(), 4));
+    // deck.append(&mut duplicate_card(create_elvish_mystic(), 4));
+    // deck.append(&mut duplicate_card(create_quirion_ranger(), 4));
+    // deck.append(&mut duplicate_card(create_elvish_warmaster(), 4));
+    // deck.append(&mut duplicate_card(create_wirewood(), 4));
+    // deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 4));
+    // deck.append(&mut duplicate_card(create_devoted_druid(), 4));
+    // deck.append(&mut duplicate_card(create_ezuri(), 2));
+    // deck.append(&mut duplicate_card(create_tyvar_kell(), 1));
+    // deck.append(&mut duplicate_card(create_chord_of_calling(), 4));
+    deck.append(&mut duplicate_card(create_test_forest(), 1));
+    deck.append(&mut duplicate_card(create_elvish_archdruid(), 4));
     deck.append(&mut duplicate_card(create_chord_of_calling(), 4));
-
-    // deck.append(&mut duplicate_card(create_cavern_of_souls(), 3));
-    deck.append(&mut duplicate_card(create_temple_garden(), 3));
-    deck.append(&mut duplicate_card(create_pendelhaven(), 2));
-    deck.append(&mut duplicate_card(create_forest(), 18));
-
-    // deck.append(&mut duplicate_card(create_test_forest(), 1));
+    deck.append(&mut duplicate_card(create_elvish_warmaster(), 3));
     // deck.append(&mut duplicate_card(create_pendelhaven(), 1));
     // deck.append(&mut duplicate_card(create_llanowar_elves(), 1));
 
@@ -1542,20 +1505,27 @@ pub fn create_green_deck_v2() -> Vec<Card> {
 
 pub fn create_green_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
-    deck.append(&mut duplicate_card(create_forest(), 12));
-    deck.append(&mut duplicate_card(create_pendelhaven(), 2));
+    deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 2));
     deck.append(&mut duplicate_card(create_priest_of_titania(), 4));
-    deck.append(&mut duplicate_card(create_llanowar_elves(), 4));
-    deck.append(&mut duplicate_card(create_heritage_druid(), 4));
-    deck.append(&mut duplicate_card(create_elvish_mystic(), 4));
-    deck.append(&mut duplicate_card(create_quirion_ranger(), 4));
-    deck.append(&mut duplicate_card(create_elvish_warmaster(), 4));
-    deck.append(&mut duplicate_card(create_wirewood(), 4));
-    deck.append(&mut duplicate_card(create_leaf_crowned_visionary(), 4));
+    deck.append(&mut duplicate_card(create_eladamri_korvecdal(), 3));
+
+    deck.append(&mut duplicate_card(create_wirewood(), 2));
     deck.append(&mut duplicate_card(create_devoted_druid(), 4));
-    deck.append(&mut duplicate_card(create_ezuri(), 2));
+    deck.append(&mut duplicate_card(create_elvish_archdruid(), 1));
+    deck.append(&mut duplicate_card(create_ezuri(), 1));
+    deck.append(&mut duplicate_card(create_elvish_mystic(), 2));
+    deck.append(&mut duplicate_card(create_heritage_druid(), 4));
+    deck.append(&mut duplicate_card(create_llanowar_elves(), 3));
+    deck.append(&mut duplicate_card(create_elvish_warmaster(), 4));
+    deck.append(&mut duplicate_card(create_quirion_ranger(), 2));
+    deck.append(&mut duplicate_card(create_tyvar_kell(), 1));
+
     deck.append(&mut duplicate_card(create_chord_of_calling(), 4));
-    deck.append(&mut duplicate_card(create_elvish_archdruid(), 4));
+
+    // deck.append(&mut duplicate_card(create_cavern_of_souls(), 3));
+    // deck.append(&mut duplicate_card(create_temple_garden(), 3));
+    deck.append(&mut duplicate_card(create_pendelhaven(), 2));
+    deck.append(&mut duplicate_card(create_forest(), 21));
 
     deck
 }
@@ -1767,7 +1737,7 @@ mod test {
             &ga,
             &player,
             FrontendCardTarget {
-                player_index: 0,
+                player_id: "".to_string(),
                 pile: FrontendPileName::Play,
                 card_index: 0,
             },
@@ -1781,7 +1751,7 @@ mod test {
             &ga,
             &player,
             FrontendCardTarget {
-                player_index: 0,
+                player_id: "".to_string(),
                 pile: FrontendPileName::Play,
                 card_index: 0,
             },
@@ -1795,7 +1765,7 @@ mod test {
             &ga,
             &player,
             FrontendCardTarget {
-                player_index: 0,
+                player_id: "".to_string(),
                 pile: FrontendPileName::Play,
                 card_index: 0,
             },
@@ -1809,7 +1779,7 @@ mod test {
             &ga,
             &player,
             FrontendCardTarget {
-                player_index: 0,
+                player_id: "".to_string(),
                 pile: FrontendPileName::Play,
                 card_index: 0,
             },

@@ -46,6 +46,7 @@ pub enum StatType {
     Deathtouch,
     Vigilance,
     Counter,
+    Haist,
 }
 
 #[derive(Debug)]

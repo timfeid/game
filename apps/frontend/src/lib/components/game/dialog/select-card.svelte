@@ -19,6 +19,8 @@
 	import CCard from '../Card.svelte';
 	import { toast } from 'svelte-sonner';
 	import { client } from '../../../client';
+	import * as Dialog from '../../ui/dialog';
+	import { RSPCError } from '@rspc/client';
 
 	let cards: CardSelectionDetails | undefined;
 	export let game: GameState;
@@ -38,36 +40,46 @@
 	});
 
 	async function selectCard(index: number) {
-		if (!cards?.valid_card_indexes.includes(index)) {
-			toast.error('invalid card selected?');
-			return;
+		if (cards) {
+			const target = cards.cards[index].frontend_target;
+			try {
+				await client.mutation(['lobby.respond.card_selection', { code, target: { Card: target } }]);
+				open = false;
+			} catch (e) {
+				if (e instanceof RSPCError) {
+					return toast.error(e.message);
+				}
+				toast.error('Unknown error!');
+			}
 		}
-		const target = cards.cards[index].frontend_target;
-		await client.mutation(['lobby.respond.card_selection', { code, target: { Card: target } }]);
-		open = false;
 	}
 
 	let open = true;
 </script>
 
 {#if cards}
-	<AlertDialog.Root bind:open>
-		<AlertDialog.Content>
-			<AlertDialog.Header>
-				<AlertDialog.Title>Choose a card</AlertDialog.Title>
-				<ul class="border rounded">
+	<Dialog.Root bind:open>
+		<Dialog.Portal>
+			<Dialog.Overlay />
+			<Dialog.Content class="!w-[90vw] !max-w-[1400px]">
+				<Dialog.Title>Choose a card</Dialog.Title>
+
+				<ul class="border rounded w-full overflow-x-auto flex space-x-2">
 					{#each cards.cards as card, i}
 						<li class="border-b px-2 last:border-b-0 py-2">
-							<button on:click={() => selectCard(i)}>
-								<CCard cardWithDetails={card} {game}></CCard>
+							<button on:click|stopPropagation={() => selectCard(i)}>
+								<CCard noTooltips class="pointer-events-none" cardWithDetails={card} {game}></CCard>
 							</button>
 						</li>
 					{/each}
 				</ul>
-			</AlertDialog.Header>
-			<AlertDialog.Footer>
-				<AlertDialog.Action on:click={cancel}>Cancel</AlertDialog.Action>
-			</AlertDialog.Footer>
-		</AlertDialog.Content>
-	</AlertDialog.Root>
+
+				<div class="flex w-full justify-end">
+					<Dialog.Close>
+						<Button>Cancel</Button>
+					</Dialog.Close>
+				</div>
+			</Dialog.Content>
+		</Dialog.Portal>
+	</Dialog.Root>
 {/if}
