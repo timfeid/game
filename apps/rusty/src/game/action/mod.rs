@@ -1268,10 +1268,6 @@ impl CardAction for ApplyEffectToCardBasedOnTotalCardType {
         target: EffectTarget,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        println!(
-            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
-            card_arc, target
-        );
         let owner_arc = {
             let card = card_arc.lock().await;
             card.owner.clone()
@@ -1402,10 +1398,6 @@ impl CardAction for ApplyEffectsToPlayerCreatureType {
         target: EffectTarget,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        println!(
-            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
-            card_arc, target
-        );
         let owner_arc = {
             let card = card_arc.lock().await;
             card.owner.clone()
@@ -1435,8 +1427,6 @@ impl CardAction for ApplyEffectsToPlayerCreatureType {
                         let effect_id = effect.as_ref().lock().await.get_final_id().clone();
                         game.effect_manager.add_effect(effect_id, effect);
                     }
-                } else {
-                    // println!("Card does not match card type {:?}", self.card_type);
                 }
             }
         } else {
@@ -1473,10 +1463,6 @@ impl CardAction for ApplyEffectToPlayerCardType {
         target: EffectTarget,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        println!(
-            "effect target for dynamic effect\n\n\ncard: {:?}\ntarget: {:?}\n\n\n",
-            card_arc, target
-        );
         let owner_arc = {
             let card = card_arc.lock().await;
             card.owner.clone()
@@ -1504,8 +1490,6 @@ impl CardAction for ApplyEffectToPlayerCardType {
 
                         game.effect_manager.add_effect(effect_id, effect);
                     }
-                } else {
-                    // println!("Card does not match card type {:?}", self.card_type);
                 }
             }
         } else {
@@ -1661,15 +1645,10 @@ impl ChooseFromSelectionAction {
     pub fn new(
         player_id: String,
         cards: Vec<CardWithDetails>,
-        valid_card_indexes: Vec<i32>,
         action: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
     ) -> Self {
         ChooseFromSelectionAction {
-            details: CardSelectionDetails {
-                player_id,
-                cards,
-                valid_card_indexes,
-            },
+            details: CardSelectionDetails { player_id, cards },
             action,
         }
     }

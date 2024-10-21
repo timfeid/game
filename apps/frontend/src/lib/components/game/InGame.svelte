@@ -1,55 +1,27 @@
 <script lang="ts">
-	import type { FrontendTarget, GameState, LobbyTurnMessage, PublicGameInfo } from '@gangsta/rusty';
-	import { RSPCError } from '@rspc/client';
-	import { toast } from 'svelte-sonner';
+	import type { GameState, LobbyTurnMessage, PublicGameInfo } from '@gangsta/rusty';
+	import { ArrowBigRight } from 'lucide-svelte';
 	import { client } from '../../client';
 	import { user } from '../../stores/access-token';
 	import Button from '../ui/button/button.svelte';
 	import CCard from './Card.svelte';
-	import { waitForTarget } from './game';
-	import Player from './Player.svelte';
-	import PriorityQueueNotification from './priority-queue-notification.svelte';
-	import { ArrowBigRight } from 'lucide-svelte';
-	import AskOptionalAbility from './dialog/cast-optional-ability.svelte';
 	import CastMandatoryAbility from './dialog/cast-mandatory-ability.svelte';
+	import AskOptionalAbility from './dialog/cast-optional-ability.svelte';
 	import SelectAbility from './dialog/select-ability.svelte';
 	import SelectCard from './dialog/select-card.svelte';
+	import Player from './Player.svelte';
+	import PriorityQueueNotification from './priority-queue-notification.svelte';
 
 	export let game_state: GameState;
-
-	$: console.log(game_state);
 	export let turnMessage: LobbyTurnMessage | undefined;
 	export let join_code: string;
 
 	$: self = game_state.players[$user?.sub || ''];
 
-	$: isMyTurn = self.player_index === game_state.public_info.current_turn?.current_player_index;
+	$: isMyTurn = self.sub === game_state.public_info.current_turn?.current_player_id;
 
 	async function turn() {
 		await client.mutation(['lobby.turn', join_code]);
-	}
-
-	async function executePlayCard(index: number, target: FrontendTarget | null) {
-		try {
-			await client.mutation([
-				'lobby.play_card',
-				{
-					code: join_code,
-					in_hand_index: index,
-					target: target
-				}
-			]);
-		} catch (e) {
-			if (e instanceof RSPCError) {
-				return toast.error(e.message);
-			}
-			toast.error('Unknown error!');
-		}
-	}
-	async function playCard(index: number) {
-		const card = self.hand[index];
-		const target = await waitForTarget(card.abilities[0], game_state, true);
-		return await executePlayCard(index, target);
 	}
 
 	function currentPlayer(info: PublicGameInfo) {
@@ -102,7 +74,7 @@
 		<div class="!px-3 mx-auto py-2 w-full bg-gray-100 dark:bg-gray-950 border-t mt-4">
 			<div class="flex flex-wrap gap-1 justify-center w-full">
 				{#each self.hand as card, i}
-					<CCard on:click={() => playCard(i)} game={game_state} cardWithDetails={card}></CCard>
+					<CCard game={game_state} cardWithDetails={card}></CCard>
 				{/each}
 			</div>
 		</div>

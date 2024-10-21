@@ -368,7 +368,7 @@ impl Lobby {
         index: usize,
         target: Option<EffectTarget>,
     ) -> AppResult<()> {
-        Game::play_card(&self.game, &player, index, target)
+        Game::play_card_from_hand(&self.game, &player, index, target)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 

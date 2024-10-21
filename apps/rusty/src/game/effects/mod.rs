@@ -217,10 +217,7 @@ impl Effect for AddTriggerEffect {
         self.source_card.as_ref()
     }
     async fn apply(&mut self, turn: Turn) {
-        println!("WE CALLED APPLY ON TRIGGER EFFECT FOR TURN {:?}", turn);
         if !self.applied {
-            // let mut card = card_arc.lock().await;
-            // card.mark_exiled();
             self.target.lock().await.triggers.push(self.trigger.clone());
             self.target_trigger_index = Some(self.target.lock().await.triggers.len() - 1);
             self.applied = true;

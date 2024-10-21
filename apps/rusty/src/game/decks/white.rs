@@ -867,7 +867,6 @@ fn create_bishop_of_wings() -> Card {
             Arc::new(AsyncClosureWithCardAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>, source: Arc<Mutex<Card>>, card_destroyed: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
-                        println!("card: {:?}", card_destroyed);
                         let creature_type = {card_destroyed.lock().await.creature_type.clone()};
                         let owner = {card_destroyed.lock().await.owner.clone().unwrap()};
 
@@ -1232,22 +1231,22 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let a = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let c = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let c = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), c.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let d = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let d = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
@@ -1287,17 +1286,17 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let a = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying enchantment");
-        let b = Game::play_card(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 

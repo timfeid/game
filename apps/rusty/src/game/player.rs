@@ -537,7 +537,7 @@ impl Player {
                 card.lock().await.tap()?;
             }
 
-            player.lock().await.pay_mana(&mana_requirements).await;
+            player.lock().await.pay_mana(&mana_requirements).await?;
 
             actions
         };
@@ -656,8 +656,6 @@ impl Player {
                             }
                         }
                     }
-                } else {
-                    println!("hmm card locked: {:?}", card);
                 }
             }
         }
@@ -682,8 +680,45 @@ impl Player {
 
     pub async fn play_card(
         player_arc: &Arc<Mutex<Player>>,
+        card: &Arc<Mutex<Card>>,
+        current_turn: Turn,
+    ) -> Result<(), String> {
+        // Lock the player to mutate state
+
+        let can_pay_to_cast = player_arc.lock().await.pool_has_cost_for_card(&card).await;
+        let can_play = player_arc
+            .lock()
+            .await
+            .can_play(&card, Arc::ptr_eq(&current_turn.current_player, player_arc))
+            .await;
+        let name = player_arc.lock().await.name.clone();
+
+        if !can_play {
+            return Err(format!(
+                "You cannot cast {} right now for {}",
+                card.lock().await.name,
+                name
+            ));
+        }
+
+        if !can_pay_to_cast {
+            return Err(format!(
+                "Not enough mana to cast card {} for {}",
+                card.lock().await.name,
+                name
+            ));
+        }
+        // Pay mana
+        player_arc.lock().await.pay_mana_for_card(&card).await?;
+
+        player_arc.lock().await.spells.push(card.clone());
+        println!("Added to spells list");
+        Ok(())
+    }
+
+    pub async fn play_card_in_hand(
+        player_arc: &Arc<Mutex<Player>>,
         index: usize,
-        target: Option<EffectTarget>,
         current_turn: Turn,
     ) -> Result<Arc<Mutex<Card>>, String> {
         // Lock the player to mutate state
@@ -719,15 +754,14 @@ impl Player {
                     name
                 ));
             }
+            // Pay mana
+            player_arc.lock().await.pay_mana_for_card(&card).await?;
 
             // Remove the card from hand
             player_arc.lock().await.cards_in_hand.remove(index);
 
             player_arc.lock().await.spells.push(card.clone());
             println!("Added to spells list");
-
-            // Pay mana
-            player_arc.lock().await.pay_mana_for_card(&card).await;
 
             card
         }; // Lock is released here
@@ -975,12 +1009,12 @@ impl Player {
         self.has_required_mana(&card.cost).await
     }
 
-    pub async fn pay_mana_for_card(&mut self, card: &Arc<Mutex<Card>>) {
+    pub async fn pay_mana_for_card(&mut self, card: &Arc<Mutex<Card>>) -> Result<(), String> {
         let cost = { card.lock().await.cost.clone() };
-        self.pay_mana(&cost).await;
+        self.pay_mana(&cost).await
     }
 
-    pub async fn pay_mana(&mut self, cost: &Vec<ManaType>) {
+    pub async fn pay_mana(&mut self, cost: &Vec<ManaType>) -> Result<(), String> {
         // Counts of required mana
         let mut white_required = 0;
         let mut blue_required = 0;
@@ -1010,7 +1044,7 @@ impl Player {
         {
             // Not enough colored mana
             // Handle error (e.g., return an error or panic)
-            panic!("Not enough colored mana to pay the cost.");
+            return Err("Not enough colored mana to pay the cost.".to_string());
         }
 
         // Deduct the colored mana costs
@@ -1032,7 +1066,7 @@ impl Player {
         if total_available_mana < generic_required {
             // Not enough mana
             // Handle error (e.g., return an error or panic)
-            panic!("Not enough mana to pay the generic mana cost.");
+            return Err("Not enough mana to pay the generic mana cost.".to_string());
         }
 
         // Now deduct the generic mana cost from the player's mana pools
@@ -1077,8 +1111,10 @@ impl Player {
         // At this point, remaining_generic should be zero
         if remaining_generic > 0 {
             // This should not happen since we've already checked if we have enough mana
-            panic!("Unexpected error: Not all generic mana cost was paid.");
+            return Err("Unexpected error: Not all generic mana cost was paid.".to_string());
         }
+
+        Ok(())
     }
 }
 

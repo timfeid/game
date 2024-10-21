@@ -61,7 +61,7 @@
 	<Dialog.Root bind:open>
 		<Dialog.Portal>
 			<Dialog.Overlay />
-			<Dialog.Content class="!w-[90vw] !max-w-[1400px]">
+			<Dialog.Content noClose class="!w-[90vw] !max-w-[1400px]">
 				<Dialog.Title>Choose a card</Dialog.Title>
 
 				<ul class="border rounded w-full overflow-x-auto flex space-x-2">

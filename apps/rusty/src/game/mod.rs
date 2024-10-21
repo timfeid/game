@@ -818,7 +818,7 @@ impl Game {
 
                         if can_pay_mana {
                             println!("can pay mana");
-                            player.lock().await.pay_mana(&ability.mana_cost).await;
+                            player.lock().await.pay_mana(&ability.mana_cost).await.ok();
                             let mut game = game_arc.lock().await;
                             println!("executing");
                             game.execute_ability(cloned_ability_id, target).await.ok();
@@ -884,17 +884,42 @@ impl Game {
         Ok(())
     }
 
-    pub async fn remove_from_frontend_target(
-        &self,
-        target: FrontendCardTarget,
-    ) -> Arc<Mutex<Card>> {
-        let mut target_index = 0;
-        for (index, player) in self.players.iter().enumerate() {
+    pub async fn get_player_from_frontend_target(
+        game: &Arc<Mutex<Game>>,
+        target: &FrontendCardTarget,
+    ) -> Result<(usize, Arc<Mutex<Player>>), String> {
+        let game = game.lock().await;
+        for (index, player) in game.players.iter().enumerate() {
             if player.lock().await.name == target.player_id {
-                target_index = index;
-                break;
+                return Ok((index, Arc::clone(player)));
             }
         }
+
+        Err("Unable to find target".to_string())
+    }
+
+    pub async fn player_from_frontend_target(
+        &self,
+        target: &FrontendCardTarget,
+    ) -> Result<(usize, Arc<Mutex<Player>>), String> {
+        for (index, player) in self.players.iter().enumerate() {
+            if player.lock().await.name == target.player_id {
+                return Ok((index, Arc::clone(player)));
+            }
+        }
+
+        Err("Unable to find target".to_string())
+    }
+
+    pub async fn remove_from_frontend_target(
+        &self,
+        target: &FrontendCardTarget,
+    ) -> Arc<Mutex<Card>> {
+        let (target_index, player) = self
+            .player_from_frontend_target(&target)
+            .await
+            .expect("Unable to get player from frontend target");
+
         match target.pile {
             FrontendPileName::Deck => {
                 let player = Arc::clone(&self.players[target_index]);
@@ -956,7 +981,7 @@ impl Game {
         }
     }
 
-    pub async fn card_from_frontend_target(&self, target: FrontendCardTarget) -> Arc<Mutex<Card>> {
+    pub async fn card_from_frontend_target(&self, target: &FrontendCardTarget) -> Arc<Mutex<Card>> {
         let mut target_index = 0;
         for (index, player) in self.players.iter().enumerate() {
             if player.lock().await.name == target.player_id {
@@ -1324,7 +1349,7 @@ impl Game {
 
         if trigger_id == "play_card".to_string() {
             println!("play card triggered!!!!!");
-            Game::play_card(game, player, card.card_index as usize, target).await?;
+            Game::play_card(game, &card, target).await?;
             return Ok(());
         }
 
@@ -1387,7 +1412,7 @@ impl Game {
             player.cards_in_hand.len() - 1
         };
 
-        let result = Game::execute_card(game_arc, player_arc, index, None).await?;
+        let result = Game::execute_card_from_hand(game_arc, player_arc, index, None).await?;
         game_arc.lock().await.resolve_stack().await?;
 
         // Now pass the game Arc to process the action queue
@@ -1396,36 +1421,35 @@ impl Game {
         Ok(result)
     }
 
-    pub async fn exiled_card_to_battlefield(game: &Arc<Mutex<Game>>, card_id: String) {
+    pub async fn exiled_card_to_battlefield(
+        game: &Arc<Mutex<Game>>,
+        card_id: String,
+    ) -> Result<(), String> {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
-        println!("looping players");
         let players = game.lock().await.players.clone();
         for (player_index, player) in players.iter().enumerate() {
-            println!("looping exileds");
             let exiled = player.lock().await.deck.exiled.clone();
             for (index, exiled_card) in exiled.iter().enumerate() {
-                println!("reading card {:?}", exiled_card);
                 let id = exiled_card.lock().await.id.clone();
                 if id == card_id {
-                    println!("found it!");
-                    if let Err(r) = Game::play_card_without_mana(
+                    Game::play_card_without_mana(
                         game,
-                        FrontendCardTarget {
+                        &FrontendCardTarget {
                             player_id: player.lock().await.name.clone(),
                             pile: FrontendPileName::Exiled,
                             card_index: index as i32,
                         },
                     )
-                    .await
-                    {
-                        println!("uh oh, returning to battlefield resulted in: {}", r);
-                    };
+                    .await?;
+                    return Ok(());
                 }
             }
         }
+
+        Err("Hmm, unable to find that card".to_string())
     }
 
-    pub async fn exile_card(&mut self, card: &Arc<Mutex<Card>>) {
+    pub async fn exile_card(&mut self, card: &Arc<Mutex<Card>>) -> Result<(), String> {
         self.remove_references_to(card).await;
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
         let owner = card.lock().await.owner.clone();
@@ -1482,12 +1506,41 @@ impl Game {
             }
 
             println!("exiled actions? {:?}", actions);
-            self.execute_actions(&mut actions).await;
+            self.execute_actions(&mut actions).await?;
             self.add_turn_message(format!("{} was exiled.", card.lock().await.name));
         }
+
+        Ok(())
     }
 
     pub async fn play_card(
+        game_arc: &Arc<Mutex<Game>>,
+        card: &FrontendCardTarget,
+        target: Option<EffectTarget>,
+    ) -> Result<Arc<Mutex<Card>>, String> {
+        let (_, player) = game_arc
+            .lock()
+            .await
+            .player_from_frontend_target(card)
+            .await?;
+
+        {
+            if let Some((current_player, _, action_taken)) =
+                &mut game_arc.lock().await.current_priority_player
+            {
+                if !Arc::ptr_eq(&player, current_player) {
+                    return Err("Not your turn".to_string());
+                } else {
+                    *action_taken = ActionType::PlayedCard;
+                }
+            }
+        }
+
+        let card = Game::execute_play_card(game_arc, card, target).await?;
+        Ok(card)
+    }
+
+    pub async fn play_card_from_hand(
         game_arc: &Arc<Mutex<Game>>,
         player: &Arc<Mutex<Player>>,
         index: usize,
@@ -1505,13 +1558,13 @@ impl Game {
             }
         }
 
-        let card = Game::execute_card(game_arc, player, index, target).await?;
+        let card = Game::execute_card_from_hand(game_arc, player, index, target).await?;
         Ok(card)
     }
 
     async fn get_card_from_frontend_position(
         game_arc: &Arc<Mutex<Game>>,
-        position: FrontendCardTarget,
+        position: &FrontendCardTarget,
     ) -> Arc<Mutex<Card>> {
         game_arc
             .lock()
@@ -1522,7 +1575,7 @@ impl Game {
 
     async fn play_card_without_mana(
         game_arc: &Arc<Mutex<Game>>,
-        card: FrontendCardTarget,
+        card: &FrontendCardTarget,
     ) -> Result<Arc<Mutex<Card>>, String> {
         let card = {
             let game = game_arc.lock().await;
@@ -1547,17 +1600,54 @@ impl Game {
         Ok(card)
     }
 
-    async fn execute_card(
+    async fn execute_play_card(
+        game_arc: &Arc<Mutex<Game>>,
+        frontend_card: &FrontendCardTarget,
+        target: Option<EffectTarget>,
+    ) -> Result<Arc<Mutex<Card>>, String> {
+        let card = game_arc
+            .lock()
+            .await
+            .remove_from_frontend_target(frontend_card)
+            .await;
+        let (_, player) = Game::get_player_from_frontend_target(game_arc, frontend_card).await?;
+        Player::play_card(
+            &player,
+            &card,
+            game_arc.lock().await.current_turn.clone().unwrap(),
+        )
+        .await?;
+
+        let game = Arc::clone(game_arc);
+        let card_cloned = card.clone();
+        tokio::spawn(async move {
+            let is_spell = { card_cloned.lock().await.card_type.is_spell().clone() };
+            if is_spell {
+                Game::priority_loop(game.clone(), card_cloned.clone()).await;
+            }
+            let action = Arc::new(PlayCardAction::new(player, card_cloned.clone(), target));
+            {
+                let mut game = game.lock().await;
+
+                game.add_to_stack(action);
+                game.resolve_stack().await.ok();
+                game.destroy_dead_creatures().await;
+            }
+        });
+
+        Ok(card)
+    }
+
+    async fn execute_card_from_hand(
         game_arc: &Arc<Mutex<Game>>,
         player: &Arc<Mutex<Player>>,
         index: usize,
         target: Option<EffectTarget>,
     ) -> Result<Arc<Mutex<Card>>, String> {
         let card = {
-            Player::play_card(
+            Player::play_card_in_hand(
                 player,
                 index,
-                target.clone(),
                 game_arc.lock().await.current_turn.clone().unwrap(),
             )
             .await?
@@ -1742,7 +1832,6 @@ impl Game {
 
                 let has_effects = self.effect_manager.has_effects(card_rc).await;
                 if card_rc.lock().await.is_useless(has_effects) {
-                    println!("card is considered useless, let's get rid of it");
                     actions.push(Arc::new(CardActionWrapper {
                         action: Arc::new(DestroyTargetCAction {}),
                         card: Arc::clone(card_rc),
@@ -1862,9 +1951,12 @@ impl Game {
     pub async fn start_turn(&mut self, player_index: usize) {
         self.reset_turn_messages();
 
+        let player_id = self.players[player_index].lock().await.name.clone();
+
         self.current_turn = Some(Turn::new(
             self.players[player_index].clone(),
             player_index,
+            player_id,
             self.turn_number,
         ));
         self.turn_number += 1;

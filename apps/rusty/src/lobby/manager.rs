@@ -27,8 +27,7 @@ use crate::game::{
     ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
 };
 use crate::http::controllers::lobby::{
-    ActionCardArgs, PlayCardArgs, RespondCardSelection, RespondMandatoryAbility,
-    RespondOptionalAbility,
+    ActionCardArgs, RespondCardSelection, RespondMandatoryAbility, RespondOptionalAbility,
 };
 use crate::services::jwt::{Claims, JwtService};
 
@@ -47,7 +46,6 @@ pub struct LobbyTurnMessage {
 pub struct CardSelectionDetails {
     pub player_id: String,
     pub cards: Vec<CardWithDetails>,
-    pub valid_card_indexes: Vec<i32>,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -263,7 +261,7 @@ impl LobbyManager {
                         .await
                         .lock()
                         .await
-                        .card_from_frontend_target(frontend_card_target)
+                        .card_from_frontend_target(&frontend_card_target)
                         .await;
                     Some(EffectTarget::Card(Arc::clone(card)))
                 }
@@ -419,42 +417,6 @@ impl LobbyManager {
         // lobby.lock().await.message(user, args.text);
         self.notify_lobby(&lobby_id).await.ok();
 
-        Ok(())
-    }
-
-    pub async fn play_card(&self, args: PlayCardArgs, user: &Claims) -> AppResult<()> {
-        let lobby_id = args.code.clone();
-        let lobby_arc = self.get_lobby(&lobby_id).await?;
-        let (player_arc, card_arc) = {
-            let lobby = lobby_arc.lock().await;
-            let player = Arc::clone(&lobby.data.game_state.players.get(&user.sub).unwrap().player);
-            let card =
-                player.clone().lock().await.cards_in_hand[args.in_hand_index as usize].clone();
-            (player, card)
-        };
-        let target = Self::convert(args.target, &lobby_arc).await;
-        let game_arc = {
-            let lobby = lobby_arc.lock().await;
-            lobby.cloned_game().await
-        };
-        let lobby_manager_clone = self.clone();
-        let lobby_id_clone = lobby_id.clone();
-
-        Game::play_card(
-            &game_arc,
-            &player_arc,
-            args.in_hand_index as usize,
-            target.clone(),
-        )
-        .await
-        .map_err(|x| AppError::BadRequest(x))?;
-
-        // let ga = Arc::clone(&game_arc);
-        // tokio::spawn(async move {
-        //     Game::process_action_queue(ga, card_arc).await;
-        // });
-
-        // Return immediately
         Ok(())
     }
 

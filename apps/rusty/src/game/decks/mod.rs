@@ -55,6 +55,9 @@ fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
     let mut cards = Vec::new();
     for i in 0..count {
         let mut card = base_card.clone();
+        card.triggers
+            .iter_mut()
+            .for_each(|x| x.id = format!("{}-{}-{}", card.name, i, Ulid::new().to_string()));
         card.id = format!("{}-{}-{}", card.name, i, card.id);
         cards.push(card);
     }

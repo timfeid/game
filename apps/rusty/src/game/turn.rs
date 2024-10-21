@@ -27,6 +27,7 @@ pub struct Turn {
     #[serde(skip_serializing, skip_deserializing)]
     pub current_player: Arc<Mutex<Player>>,
     pub current_player_index: i32,
+    pub current_player_id: String,
     pub phase: TurnPhase,
     pub turn_number: i32,
 }
@@ -35,11 +36,13 @@ impl Turn {
     pub fn new(
         current_player: Arc<Mutex<Player>>,
         current_player_index: usize,
+        current_player_id: String,
         turn_number: usize,
     ) -> Self {
         Self {
             current_player,
             current_player_index: current_player_index as i32,
+            current_player_id,
             phase: TurnPhase::Untap, // Start the turn in the Untap phase
             turn_number: turn_number as i32,
         }

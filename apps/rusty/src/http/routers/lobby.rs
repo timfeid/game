@@ -14,7 +14,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::error::AppError;
 use crate::http::controllers::lobby::ActionCardArgs;
 use crate::http::controllers::lobby::LobbyChatArgs;
-use crate::http::controllers::lobby::PlayCardArgs;
 use crate::http::controllers::lobby::RespondCardSelection;
 use crate::http::controllers::lobby::RespondMandatoryAbility;
 use crate::http::controllers::lobby::RespondOptionalAbility;
@@ -67,13 +66,6 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
             t(|ctx, args: ActionCardArgs| async move {
                 Ok(LobbyController::action_card(ctx, args).await?)
             })
-        })
-        .mutation("play_card", |t| {
-            t(
-                |ctx, args: PlayCardArgs| async move {
-                    Ok(LobbyController::play_card(ctx, args).await?)
-                },
-            )
         })
         .mutation("join", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::join(ctx, code).await?) })

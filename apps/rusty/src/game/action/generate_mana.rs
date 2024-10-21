@@ -56,30 +56,16 @@ fn untap_and_remove() -> CardActionTrigger {
                         if mana.len() == 1 {
                             let mana = &mana[0].mana_to_add;
 
-                            if card
-                                .lock()
+                            card.lock()
                                 .await
                                 .owner
                                 .as_ref()
                                 .unwrap()
                                 .lock()
                                 .await
-                                .has_required_mana(mana)
-                                .await
-                            {
-                                card.lock()
-                                    .await
-                                    .owner
-                                    .as_ref()
-                                    .unwrap()
-                                    .lock()
-                                    .await
-                                    .pay_mana(mana)
-                                    .await;
-                                card.lock().await.untap();
-                            } else {
-                                return Err("You can't do that".to_string());
-                            }
+                                .pay_mana(mana)
+                                .await?;
+                            card.lock().await.untap();
                         }
                         Ok(())
                     }

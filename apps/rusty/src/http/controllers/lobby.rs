@@ -53,13 +53,6 @@ pub struct SelectDeckArgs {
     pub deck: DeckSelector,
 }
 
-#[derive(Type, Serialize, Deserialize)]
-pub struct PlayCardArgs {
-    pub code: String,
-    pub in_hand_index: i32,
-    pub target: Option<FrontendTarget>,
-}
-
 #[derive(Deserialize, Type)]
 pub struct ListAccountArgs {}
 
@@ -202,13 +195,6 @@ impl LobbyController {
         ctx.lobby_manager
             .respond_optional_player_ability(args, user)
             .await?;
-
-        Ok(())
-    }
-
-    pub(crate) async fn play_card(ctx: Ctx, args: PlayCardArgs) -> AppResult<()> {
-        let user = ctx.required_user()?;
-        ctx.lobby_manager.play_card(args, user).await?;
 
         Ok(())
     }
