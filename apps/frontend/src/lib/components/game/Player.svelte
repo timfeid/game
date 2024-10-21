@@ -103,7 +103,7 @@
 	}
 </script>
 
-<Card class="dark:bg-gray-950">
+<Card class="bg-transparent border-0 p-0">
 	<CardHeader class="space-y-1">
 		<CardTitle class="text-2xl font-bold text-center flex items-center">
 			<button on:click={() => setPlayerTarget(player)}>
@@ -147,7 +147,9 @@
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type !== 'string'}
-					<CCard {game} cardWithDetails={card}></CCard>
+					<div class="mb-[-75px] mr-[-54px]">
+						<CCard {game} class=" origin-top-left !scale-75" cardWithDetails={card}></CCard>
+					</div>
 				{/if}
 			{/each}
 		</div>

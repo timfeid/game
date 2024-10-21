@@ -1,9 +1,9 @@
 use crate::game::{
     action::{
         generate_mana::GenerateManaAction, ActionTriggerType, ApplyDynamicEffectToCard,
-        ApplyEffectToCardBasedOnTotalCardType, AsyncClosureAction, AsyncClosureWithCardAction,
-        CardActionTrigger, CardRequiredTarget, CardTargetTeam, DeclareAttackerAction,
-        DeclareBlockerAction, LifeLinkAction, PlayerActionTarget, TriggerTarget,
+        AsyncClosureAction, AsyncClosureWithCardAction, BlankAction, CardActionTrigger,
+        CardRequiredTarget, CardTargetTeam, DeclareAttackerAction, DeclareBlockerAction,
+        LifeLinkAction, PlayerActionTarget, TriggerTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
@@ -22,23 +22,62 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
-fn create_swamp() -> Card {
+fn create_test_swamp() -> Card {
     Card::new(
         "Swamp",
         "",
-        vec![CardActionTrigger::new(
-            ActionTriggerType::AbilityWithinPhases(
-                "Add 1 {B} to your pool".to_string(),
-                vec![],
-                None,
-                true,
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
             ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
-                mana_to_add: vec![ManaType::Black],
-                target: PlayerActionTarget::Owner,
-            }),
-        )],
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {G} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                        ManaType::Black,
+                    ],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
         CardPhase::Ready,
         CardType::BasicLand(ManaType::Black),
         vec![],
@@ -46,15 +85,50 @@ fn create_swamp() -> Card {
     )
 }
 
-pub fn create_vengful_spirit() -> Card {
-    create_creature_card!(
-        "Vengeful Spirit",
-        CreatureType::None,
-        "When Vengeful Spirit deals combat damage to a player, you gain that much life.",
-        3, // Damage
-        2, // Defense
-        [ManaType::Black],
-        [StatType::Lifelink]
+fn create_swamp() -> Card {
+    Card::new(
+        "Swamp",
+        "",
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    TriggerTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
+            ),
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {G} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![ManaType::Green],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
+        CardPhase::Ready,
+        CardType::BasicLand(ManaType::Green),
+        vec![],
+        vec![],
     )
 }
 
@@ -142,33 +216,95 @@ pub fn create_hydra() -> Card {
 pub fn create_blanchwood_armor() -> Card {
     Card::new(
         "Blanchwood Armor",
-        "Enchanted creature gets +1/+1 for each Forest you control",
+        "Enchanted creature gets +1/+1 for each Swamp you control",
         vec![CardActionTrigger::new(
             ActionTriggerType::Attached,
             CardRequiredTarget::CardOfType(CardType::Creature, CardTargetTeam::Any, None),
-            Arc::new(ApplyEffectToCardBasedOnTotalCardType {
-                card_type: CardType::BasicLand(ManaType::Black),
-                effects_generator: Arc::new(|target, source_card, amount_calculator| {
-                    vec![
-                        Arc::new(Mutex::new(DynamicStatModifierEffect::new(
-                            target.clone(),
-                            StatType::Power,
-                            amount_calculator.clone(),
-                            ExpireContract::Never,
-                            source_card.clone(),
-                            false,
-                        ))),
-                        Arc::new(Mutex::new(DynamicStatModifierEffect::new(
-                            target,
-                            StatType::Toughness,
-                            amount_calculator.clone(),
-                            ExpireContract::Never,
-                            source_card.clone(),
-                            false,
-                        ))),
-                    ]
-                }),
-            }),
+            Arc::new(AsyncClosureWithCardAction::new(Arc::new(|game, source, card| {
+                Box::pin(async move {
+                    source.lock().await.attached = Some(card.clone());
+                    Ok(())
+                })
+            }))),
+        ),
+        CardActionTrigger::new(
+            ActionTriggerType::Continuous,
+            CardRequiredTarget::None,
+            Arc::new(ApplyDynamicEffectToCard::new(
+                Arc::new(
+                    move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i16> + Send>> {
+                        Box::pin(async move {
+                            let owner = {
+                                let card = card_arc.lock().await;
+                                card.owner.clone()
+                            };
+
+                            if let Some(owner_arc) = owner {
+                                let owner = owner_arc.lock().await;
+                                let lands = owner.filter_cards_in_play(Arc::new(|card| {
+                                    Box::pin(async move {
+                                        let card_type = card.lock().await.card_type.clone();
+                                        card_type == CardType::BasicLand(ManaType::Black)
+                                    })
+                                })).await;
+                                return lands.len() as i16;
+                            }
+                            0
+                        })
+                    },
+                ),
+                Arc::new(
+                    move |_target,
+                          source_card,
+                          amount,
+                          effect_id|
+                          -> Pin<
+                        Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+                    > {
+                        Box::pin(async move {
+                            let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+                            let attached = source_card.lock().await.attached.clone();
+                            if let Some(card) = attached {
+
+                                let target = EffectTarget::Card(card);
+                                let mut effect = DynamicStatModifierEffect::new(
+                                    target.clone(),
+                                    StatType::Power,
+                                    amount.clone(),
+                                    ExpireContract::Never,
+                                    Some(source_card.clone()),
+                                    false,
+                                );
+
+                                let id = format!(
+                                    "{}-{}-power",
+                                    source_card.clone().lock().await.id,
+                                    effect_id
+                                );
+                                effect.id = EffectID(id);
+                                effects.push(Arc::new(Mutex::new(effect)));
+                                let mut effect = DynamicStatModifierEffect::new(
+                                    target,
+                                    StatType::Toughness,
+                                    amount,
+                                    ExpireContract::Never,
+                                    Some(source_card.clone()),
+                                    false,
+                                );
+                                let id = format!(
+                                    "{}-{}-toughness",
+                                    source_card.clone().lock().await.id,
+                                    effect_id
+                                );
+                                effect.id = EffectID(id);
+                                effects.push(Arc::new(Mutex::new(effect)));
+                            }
+
+                            effects
+                        })
+                    },
+                ),
+            )),
         )],
         CardPhase::Ready,
         CardType::Enchantment,
@@ -179,9 +315,10 @@ pub fn create_blanchwood_armor() -> Card {
 
 pub fn create_black_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
-    deck.append(&mut duplicate_card(create_blanchwood_armor(), 4));
-    deck.append(&mut duplicate_card(create_swamp(), 8));
-    deck.append(&mut duplicate_card(create_hydra(), 4));
+    // deck.append(&mut duplicate_card(create_blanchwood_armor(), 4));
+    // deck.append(&mut duplicate_card(create_hydra(), 4));
+
+    deck.append(&mut duplicate_card(create_test_swamp(), 1));
 
     deck
 }

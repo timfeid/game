@@ -34,7 +34,15 @@
 		{/each}
 		<!-- Overlay for the fade effect -->
 		<div
-			class="absolute top-0 left-0 w-full h-16 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
+			class=" test absolute top-0 left-0 w-full h-16 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
 		></div>
 	</div>
 {/if}
+
+<style lang="css">
+	.test {
+		-webkit-background-clip: text;
+		background-clip: text;
+		-webkit-text-fill-color: transparent;
+	}
+</style>

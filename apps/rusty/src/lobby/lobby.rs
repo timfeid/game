@@ -217,6 +217,8 @@ impl Lobby {
             DeckSelector::Elves,
             DeckSelector::Elves2,
             DeckSelector::Angels,
+            DeckSelector::Black,
+            DeckSelector::Blue,
         ];
     }
 

@@ -36,14 +36,14 @@
 
 <div class="min-h-[calc(100vh-3rem)] flex flex-col w-full">
 	<div
-		class="flex sticky top-12 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
+		class=" z-50 sticky top-0 bg-gradient-to-r from-red-500 from-10% to via-purple-700 via-50% to-indigo-500 to-90% flex shadow-xl"
 	>
 		<div class="container !px-3 pb-6">
 			<div class="h-24 flex items-center w-full min-w-full">
 				<PriorityQueueNotification {turnMessage} game={game_state}></PriorityQueueNotification>
 			</div>
 			{#if game_state.public_info.current_turn}
-				<div class="text-center">
+				<div class="text-center text-4xl uppercase dark:gray-950 font-serif text-white">
 					Turn #{game_state.public_info.current_turn.turn_number},
 					{currentPlayer(game_state.public_info)}'s
 					{game_state.public_info.current_turn.phase}
@@ -51,7 +51,7 @@
 			{/if}
 		</div>
 	</div>
-	<div class="w-full flex-grow !px-3">
+	<div class="w-full flex-grow !px-3 pt-6">
 		<div class="grid grid-cols-2 gap-3">
 			{#each Object.keys(game_state.players) as key}
 				{@const player = game_state.players[key]}
@@ -60,7 +60,7 @@
 		</div>
 	</div>
 
-	<div class="z-50 sticky bottom-0 left-0 right-0">
+	<div class="z-40 sticky bottom-0 left-0 right-0">
 		<div class="container !px-3 mx-auto pt-2 flex items-center">
 			{#if isMyTurn}
 				<Button

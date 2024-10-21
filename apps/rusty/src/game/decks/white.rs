@@ -1,10 +1,10 @@
 use crate::game::{
     action::{
         generate_mana::GenerateManaAction, ActionTriggerType, ApplyDynamicEffectToCard,
-        ApplyEffectToCardBasedOnTotalCardType, ApplyEffectToTargetAction, ApplyStat,
-        AsyncClosureAction, AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction,
-        BlankAction, CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper,
-        CardRequiredTarget, CardTargetTeam, CastMandatoryAdditionalAbility, DeclareAttackerAction,
+        ApplyEffectToTargetAction, ApplyStat, AsyncClosureAction,
+        AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, BlankAction,
+        CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
+        CardTargetTeam, CastMandatoryAdditionalAbility, DeclareAttackerAction,
         DeclareBlockerAction, PlayCardAction, PlayerActionTarget, TriggerTarget,
     },
     card::{
@@ -1231,22 +1231,30 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let a = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let c = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let c = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), c.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let d = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let d = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
@@ -1286,17 +1294,23 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
 
         println!("\n\n\n\nplaying creature");
-        let a = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let a = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), a.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying creature");
-        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 
         println!("\n\n\n\nplaying enchantment");
-        let b = Game::play_card_from_hand(&ga, &player, 0, None).await.expect("oh");
+        let b = Game::play_card_from_hand(&ga, &player, 0, None)
+            .await
+            .expect("oh");
         // Game::process_action_queue(ga.clone(), b.clone()).await;
         ga.lock().await.print().await;
 

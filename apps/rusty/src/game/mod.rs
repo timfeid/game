@@ -276,8 +276,10 @@ impl CardWithDetails {
                         false
                     };
                     // if can_pay_mana && within_phase {
-                    let mut meets_requirements_except_mana =
-                        within_phase && in_play && (!card.tapped || !required_tap);
+                    let mut meets_requirements_except_mana = within_phase
+                        && in_play
+                        && ((!card.tapped && card.current_phase == CardPhase::Ready)
+                            || !required_tap);
                     if let Some(game_arc) = &game_arc {
                         if let Some(card) = &original_card_arc {
                             meets_requirements_except_mana = meets_requirements_except_mana
