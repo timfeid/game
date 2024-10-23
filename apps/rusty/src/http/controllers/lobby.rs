@@ -180,13 +180,6 @@ impl LobbyController {
         Ok(())
     }
 
-    pub(crate) async fn attach_card(ctx: Ctx, args: ActionCardArgs) -> AppResult<()> {
-        let user = ctx.required_user()?;
-        ctx.lobby_manager.attach_card(args, user).await?;
-
-        Ok(())
-    }
-
     pub(crate) async fn respond_optional_ability(
         ctx: Ctx,
         args: RespondOptionalAbility,

@@ -2,14 +2,12 @@ use crate::{
     game::{
         action::{
             generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
-            ApplyEffectToPlayerCardType, ApplyEffectToTargetAction,
-            ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
-            AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, BlankAction,
-            CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
+            ApplyEffectsToPlayerCreatureType, AsyncClosureAction, BlankAction, CardAction,
+            CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
             CardTargetTeam, CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
             ChooseFromSelectionAction, DamageTarget, DeclareAttackerAction, DeclareBlockerAction,
-            DrawCardAction, DrawCardCardAction, PlayCardAction, PlayerActionTarget,
-            ReturnToHandAction, TapCardAction, TriggerTarget,
+            DrawCardAction, DrawCardCardAction, PhaseTarget, PlayCardAction, PlayerActionTarget,
+            ReturnToHandAction, TapCardAction,
         },
         card::{
             card::{create_creature_card, create_multiple_cards},
@@ -56,7 +54,7 @@ fn create_test_forest() -> Card {
                         TurnPhase::End,
                         TurnPhase::Cleanup,
                     ],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(BlankAction {}),
@@ -119,7 +117,7 @@ fn create_forest() -> Card {
                         TurnPhase::End,
                         TurnPhase::Cleanup,
                     ],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(BlankAction {}),
@@ -288,9 +286,9 @@ pub fn create_elvish_warmaster() -> Card {
         ),
 
         CardActionTrigger::new(
-            ActionTriggerType::CreatureTypeCardPlayed(TriggerTarget::Owner, CreatureType::Elf),
+            ActionTriggerType::CreatureTypeCardPlayed(PhaseTarget::Owner, CreatureType::Elf),
             CardRequiredTarget::None,
-            Arc::new(AsyncClosureActionWithTargetAndAbility::new(Arc::new(
+            Arc::new(AsyncClosureAction::new(Arc::new(
                 |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
 
                     Box::pin(async move {
@@ -502,8 +500,8 @@ pub fn create_priest_of_titania() -> Card {
     )
 }
 
-fn regenerate_target_card() -> Arc<AsyncClosureWithCardAction> {
-    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+fn regenerate_target_card() -> Arc<AsyncClosureAction> {
+    Arc::new(AsyncClosureAction::new(Arc::new(
         |game: Arc<Mutex<Game>>,
          source: Arc<Mutex<Card>>,
          target_card: Arc<Mutex<Card>>|
@@ -552,7 +550,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                         ability_id: None,
                         card: source_card,
                         action: Arc::new(ChooseFromSelectionAction::new(player_id, cards, Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                            Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                            Arc::new(AsyncClosureAction::new(Arc::new(
                             |game: Arc<Mutex<Game>>,
                             source_card: Arc<Mutex<Card>>,
                             target: Arc<Mutex<Card>>|
@@ -591,7 +589,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                 ),
                 description: "Tap untapped creature you control".to_string(),
                 ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                    Arc::new(AsyncClosureAction::new(Arc::new(
                         |game: Arc<Mutex<Game>>,
                          source_card: Arc<Mutex<Card>>,
                          target: Arc<Mutex<Card>>|
@@ -614,7 +612,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                                             ),
                                             description: "Tap untapped creature you control".to_string(),
                                             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                Arc::new(AsyncClosureAction::new(Arc::new(
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
@@ -640,7 +638,7 @@ pub fn create_eladamri_korvecdal() -> Card {
                                                                     ability_id: None,
                                                                     card: source_card,
                                                                     action: Arc::new(ChooseFromSelectionAction::new(player_id, cards, Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                Arc::new(AsyncClosureAction::new(Arc::new(
                                                 |game: Arc<Mutex<Game>>,
                                                 source_card: Arc<Mutex<Card>>,
                                                 target: Arc<Mutex<Card>>|
@@ -847,7 +845,7 @@ pub fn create_heritage_druid() -> Card {
                 ),
                 description: "Tap an untapped Elf you control".to_string(),
                 ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                    Arc::new(AsyncClosureAction::new(Arc::new(
                         |game: Arc<Mutex<Game>>,
                          source_card: Arc<Mutex<Card>>,
                          target: Arc<Mutex<Card>>|
@@ -870,7 +868,7 @@ pub fn create_heritage_druid() -> Card {
                                             ),
                                             description: "Tap an untapped Elf you control".to_string(),
                                             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                Arc::new(AsyncClosureAction::new(Arc::new(
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
@@ -891,7 +889,7 @@ pub fn create_heritage_druid() -> Card {
                                                                         ),
                                                                         description: "Tap an untapped Elf you control".to_string(),
                                                                         ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                                                            Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                                            Arc::new(AsyncClosureAction::new(Arc::new(
                                                                                 |game: Arc<Mutex<Game>>,
                                                                                 source_card: Arc<Mutex<Card>>,
                                                                                 target: Arc<Mutex<Card>>|
@@ -1022,7 +1020,7 @@ pub fn create_wirewood() -> Card {
                                                 "Untap target creature"
                                                     .to_string(),
                                             ability: Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                Arc::new(AsyncClosureAction::new(Arc::new(
                                                     |game: Arc<Mutex<Game>>,
                                                     source: Arc<Mutex<Card>>,
                                                     card_played: Arc<Mutex<Card>>|
@@ -1076,7 +1074,7 @@ pub fn create_leaf_crowned_visionary() -> Card {
         [ManaType::Green, ManaType::Green],
         [],
         CardActionTrigger::new(
-            ActionTriggerType::OtherCardPlayed(TriggerTarget::Owner),
+            ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner),
             CardRequiredTarget::None,
             Arc::new(CastOptionalAdditionalAbility::new(
                  vec![ManaType::Green],
@@ -1168,7 +1166,7 @@ pub fn create_cavern_of_souls() -> Card {
                         TurnPhase::End,
                         TurnPhase::Cleanup,
                     ],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(BlankAction {}),
@@ -1223,7 +1221,7 @@ pub fn create_pendelhaven() -> Card {
                         TurnPhase::End,
                         TurnPhase::Cleanup,
                     ],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(BlankAction {}),
@@ -1306,7 +1304,7 @@ pub fn create_chord_of_calling() -> Card {
                                 ability_id: None,
                                 card: source,
                                 action: Arc::new(ChooseFromSelectionAction::new(player_id, cards, Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-                                        Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                        Arc::new(AsyncClosureAction::new(Arc::new(
                                         |game: Arc<Mutex<Game>>,
                                         source_card: Arc<Mutex<Card>>,
                                         target: Arc<Mutex<Card>>|
@@ -1367,7 +1365,7 @@ pub fn create_quirion_ranger() -> Card {
                     false,
                 ),
                 CardRequiredTarget::CardOfType(CardType::BasicLand(ManaType::Green), CardTargetTeam::Owner, None),
-                    Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                    Arc::new(AsyncClosureAction::new(Arc::new(
                         |game: Arc<Mutex<Game>>,
                         source_card: Arc<Mutex<Card>>,
                         target: Arc<Mutex<Card>>|
@@ -1391,7 +1389,7 @@ pub fn create_quirion_ranger() -> Card {
                                             ),
                                             description: "Untap target creature".to_string(),
                                             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                                Arc::new(AsyncClosureWithCardAction::new(Arc::new(
+                                                Arc::new(AsyncClosureAction::new(Arc::new(
                                                     |game: Arc<Mutex<Game>>,
                                                     source_card: Arc<Mutex<Card>>,
                                                     target: Arc<Mutex<Card>>|
@@ -1492,7 +1490,7 @@ pub fn create_temple_garden() -> Card {
                         TurnPhase::End,
                         TurnPhase::Cleanup,
                     ],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(CastOptionalAdditionalAbility {

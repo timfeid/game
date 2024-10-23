@@ -3,13 +3,13 @@ use crate::{
         action::{
             generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
             ApplyEffectToPlayerCardType, ApplyEffectToTargetAction,
-            ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
-            AsyncClosureActionWithTargetAndAbility, AsyncClosureWithCardAction, BlankAction,
-            CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
-            CardTargetTeam, CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
+            ApplyEffectsToPlayerCreatureType, AsyncClosureAction, AsyncClosureAction,
+            AsyncClosureWithCardAction, BlankAction, CardAction, CardActionTarget,
+            CardActionTrigger, CardActionWrapper, CardRequiredTarget, CardTargetTeam,
+            CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
             ChooseFromSelectionAction, DamageTarget, DeclareAttackerAction, DeclareBlockerAction,
-            DrawCardAction, DrawCardCardAction, PlayCardAction, PlayerActionTarget,
-            ReturnToHandAction, TapCardAction, TriggerTarget,
+            DrawCardAction, DrawCardCardAction, PhaseTarget, PlayCardAction, PlayerActionTarget,
+            ReturnToHandAction, TapCardAction,
         },
         card::{
             card::{create_creature_card, create_multiple_cards},
@@ -69,7 +69,7 @@ pub fn create_tyvar_kell() -> Card {
             CardActionTrigger::new(
                 ActionTriggerType::CardPlayedFromHand(Some((
                     vec![TurnPhase::Main, TurnPhase::Main2],
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ))),
                 CardRequiredTarget::None,
                 Arc::new(AsyncClosureAction::new(Arc::new(
@@ -95,7 +95,7 @@ pub fn create_tyvar_kell() -> Card {
             ),
             CardActionTrigger::new(
                 ActionTriggerType::OtherCardPlayed(
-                    TriggerTarget::Owner,
+                    PhaseTarget::Owner,
                 ),
                 CardRequiredTarget::None,
                 Arc::new(AsyncClosureWithCardAction::new(Arc::new(
@@ -118,11 +118,11 @@ pub fn create_tyvar_kell() -> Card {
                 ActionTriggerType::AbilityWithinPhases(
                     "[+1]: Put a +1/+1 counter on up to one target Elf. Untap it. It gains deathtouch until end of turn.".to_string(),
                     vec![],
-                    Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner)),
+                    Some((vec![TurnPhase::Main, TurnPhase::Main2], PhaseTarget::Owner)),
                     false,
                 ),
                 CardRequiredTarget::None,
-                Arc::new(AsyncClosureActionWithTargetAndAbility::new(Arc::new(
+                Arc::new(AsyncClosureAction::new(Arc::new(
                     |game: Arc<Mutex<Game>>, source_card: Arc<Mutex<Card>>, target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                         Box::pin(async move {
                             let ability_id = ability_id.clone();
@@ -190,11 +190,11 @@ pub fn create_tyvar_kell() -> Card {
                 ActionTriggerType::AbilityWithinPhases(
                     "[0]: Create a 1/1 green Elf Warrior creature token.".to_string(),
                     vec![],
-                    Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner)),
+                    Some((vec![TurnPhase::Main, TurnPhase::Main2], PhaseTarget::Owner)),
                     false,
                 ),
                 CardRequiredTarget::None,
-                Arc::new(AsyncClosureActionWithTargetAndAbility::new(Arc::new(
+                Arc::new(AsyncClosureAction::new(Arc::new(
                     |game: Arc<Mutex<Game>>, source_card: Arc<Mutex<Card>>, target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                         Box::pin(async move {
                             let owner = source_card.lock().await.owner.clone();
@@ -220,7 +220,7 @@ pub fn create_tyvar_kell() -> Card {
                 ActionTriggerType::AbilityWithinPhases(
                     "[−6]: You get an emblem with \"Whenever you cast an Elf spell, it gains haste until end of turn and you draw two cards.\"".to_string(),
                     vec![],
-                    Some((vec![TurnPhase::Main, TurnPhase::Main2], TriggerTarget::Owner)),
+                    Some((vec![TurnPhase::Main, TurnPhase::Main2], PhaseTarget::Owner)),
                     false,
                 ),
                 CardRequiredTarget::None,
@@ -237,7 +237,7 @@ pub fn create_tyvar_kell() -> Card {
                             if let Some(owner) = owner {
                                 source.lock().await.triggers.push(
                                     CardActionTrigger::new(
-                                        ActionTriggerType::OtherCardPlayed(TriggerTarget::Owner),
+                                        ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner),
                                         CardRequiredTarget::None,
                                         Arc::new(AsyncClosureWithCardAction::new(Arc::new(
                                             |game: Arc<Mutex<Game>>, source: Arc<Mutex<Card>>, card_played: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {

@@ -119,6 +119,7 @@
 			: null;
 
 	async function actionCard() {
+		console.log(cardWithDetails.abilities);
 		if ($searchingForTarget) {
 			console.log('set target.');
 			target.set({ Card: cardWithDetails.frontend_target });
@@ -130,7 +131,6 @@
 		if (game) {
 			if ($user?.sub === cardWithDetails.frontend_target.player_id) {
 				try {
-					console.log(cardWithDetails.abilities);
 					const ability = await selectAbility(cardWithDetails);
 					if (!ability) {
 						const maybeAbilities = cardWithDetails.abilities.filter(
@@ -156,7 +156,7 @@
 	async function executeAction(target: FrontendTarget | null, ability: AbilityDetails) {
 		try {
 			await client.mutation([
-				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
+				'lobby.action_card',
 				{
 					code: game!.code,
 					card: cardWithDetails.frontend_target,

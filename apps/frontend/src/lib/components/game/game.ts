@@ -160,6 +160,11 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 							return resolve(frontendTarget);
 						}
 					}
+					if (ability.required_target === 'EnemyCardOrPlayer') {
+						// prob check team ?
+
+						return resolve(frontendTarget);
+					}
 					// console.log(ability.required_target);
 					// if ((ability.required_target as any).CardOfType) {
 					// 	// if ((frontendTarget.Card. as any).CardOfType);

@@ -6,7 +6,7 @@ use crate::game::{
     card::Card,
     effects::EffectTarget,
     stat::{Stat, StatType, Stats},
-    Game,
+    FrontendTarget, Game,
 };
 
 use super::CardAction;
@@ -24,14 +24,14 @@ impl CardAction for CardAddStatAction {
     }
     async fn apply(
         &self,
-        game: &mut Game,
+        game: Arc<Mutex<Game>>,
         card: Arc<Mutex<Card>>,
-        target: EffectTarget,
+        target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
         println!("add stat? target: {:?}", target);
         let mut card = card.lock().await;
-        card.add_stat(self.id.clone(), self.stat.clone()).await;
+        card.add_stat(self.id.clone(), self.stat.clone());
         Ok(())
     }
 }

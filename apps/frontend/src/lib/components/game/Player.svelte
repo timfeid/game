@@ -89,7 +89,7 @@
 			return;
 		}
 		const card = player.public_info.cards_in_play[index];
-		if (self.player_index === player.player_index && card) {
+		if (self.sub === player.sub && card) {
 			const ability = await selectAbility(card);
 			if (ability) {
 				const target = await waitForTarget(ability, game);
@@ -99,14 +99,14 @@
 	}
 
 	async function setPlayerTarget(player: PlayerState) {
-		target.set({ Player: player.player_index });
+		target.set({ Player: player.sub });
 	}
 </script>
 
 <Card class="bg-transparent border-0 p-0">
 	<CardHeader class="space-y-1">
 		<CardTitle class="text-2xl font-bold text-center flex items-center">
-			<button on:click={() => setPlayerTarget(player)}>
+			<button data-player={player.sub} on:click={() => setPlayerTarget(player)}>
 				<div class="mr-4 flex items-center space-x-1">
 					<div>
 						{playerName}
@@ -147,9 +147,7 @@
 		<div class="flex flex-wrap gap-2">
 			{#each player.public_info.cards_in_play as card, i}
 				{#if typeof card.card.card_type !== 'string'}
-					<div class="mb-[-75px] mr-[-54px]">
-						<CCard {game} class=" origin-top-left !scale-75" cardWithDetails={card}></CCard>
-					</div>
+					<CCard {game} cardWithDetails={card}></CCard>
 				{/if}
 			{/each}
 		</div>

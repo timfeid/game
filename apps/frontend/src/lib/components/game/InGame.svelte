@@ -11,6 +11,7 @@
 	import SelectCard from './dialog/select-card.svelte';
 	import Player from './Player.svelte';
 	import PriorityQueueNotification from './priority-queue-notification.svelte';
+	import AttackerLines from './attacker-lines.svelte';
 
 	export let game_state: GameState;
 	export let turnMessage: LobbyTurnMessage | undefined;
@@ -26,13 +27,15 @@
 
 	function currentPlayer(info: PublicGameInfo) {
 		for (const k of Object.keys(game_state.players)) {
-			if (game_state.players[k].player_index === info.current_turn?.current_player_index) {
+			if (game_state.players[k].sub === info.current_turn?.current_player_id) {
 				return k;
 			}
 		}
 		return '';
 	}
 </script>
+
+<AttackerLines game={game_state} />
 
 <div class="min-h-[calc(100vh-3rem)] flex flex-col w-full">
 	<div

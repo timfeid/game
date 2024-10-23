@@ -1,16 +1,12 @@
-pub mod black;
-pub mod blue;
-pub mod green;
-pub mod green_a;
-pub mod red;
+// pub mod black;
+// pub mod blue;
+// pub mod green;
+// pub mod green_a;
+// pub mod red;
 pub mod white;
 
-use black::create_black_deck;
-use blue::create_blue_deck;
-use green::{create_green_deck, create_green_deck_v2};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use red::create_red_deck;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::future::Future;
@@ -19,13 +15,12 @@ use std::sync::Arc;
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use ulid::Ulid;
-use white::create_angels_deck;
+use white::{create_angels_blue_deck, create_angels_deck};
 
 use crate::game::action::generate_mana::GenerateManaAction;
 use crate::game::action::{
-    ActionTriggerType, AsyncClosureAction, AsyncClosureWithCardAction, CardActionTarget,
-    CardActionTrigger, CardRequiredTarget, CounterSpellAction, DrawCardAction, PlayerActionTarget,
-    ReturnToHandAction, TriggerTarget,
+    ActionTriggerType, AsyncClosureAction, CardActionTarget, CardActionTrigger, CardRequiredTarget,
+    CounterSpellAction, DrawCardAction, PhaseTarget, PlayerActionTarget, ReturnToHandAction,
 };
 use crate::game::card::card::create_creature_card;
 use crate::game::card::{CardPhase, CardType, CreatureType};
@@ -67,12 +62,13 @@ fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
 impl Deck {
     pub fn cards_from_selection(selection: &DeckSelector) -> Vec<Card> {
         match selection {
-            DeckSelector::Elves => create_green_deck(),
-            DeckSelector::Elves2 => create_green_deck_v2(),
-            DeckSelector::Blue => create_blue_deck(),
-            DeckSelector::Black => create_black_deck(),
+            // DeckSelector::Elves => create_green_deck(),
+            // DeckSelector::Elves2 => create_green_deck_v2(),
+            // DeckSelector::Blue => create_blue_deck(),
+            // DeckSelector::Black => create_black_deck(),
             DeckSelector::Angels => create_angels_deck(),
-            DeckSelector::Red => create_red_deck(),
+            // DeckSelector::Red => create_red_deck(),
+            // DeckSelector::AngelsBlue => create_angels_blue_deck(),
         }
     }
     pub fn new_from_selection(selection: &DeckSelector) -> Self {

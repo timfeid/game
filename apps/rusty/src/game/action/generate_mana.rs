@@ -8,12 +8,12 @@ use crate::game::{
     mana::ManaType,
     player::Player,
     turn::Turn,
-    Game,
+    FrontendTarget, Game,
 };
 
 use super::{
-    ActionTriggerType, AsyncClosureAction, CardAction, CardActionTrigger, CardRequiredTarget,
-    PlayerAction, PlayerActionTarget,
+    ActionBuilder, ActionTriggerType, AsyncClosureAction, CardAction, CardActionTrigger,
+    CardRequiredTarget, PlayerAction, PlayerActionTarget,
 };
 
 #[derive(Debug, Clone)]
@@ -23,56 +23,52 @@ pub struct GenerateManaAction {
 }
 
 fn untap_and_remove() -> CardActionTrigger {
-    CardActionTrigger::new(
+    ActionBuilder::new(
         ActionTriggerType::AbilityWithinPhases("Undo tap".to_string(), vec![], None, false),
         CardRequiredTarget::None,
-        Arc::new(AsyncClosureAction::new(Arc::new(
-            |game: Arc<Mutex<Game>>,
-             card: Arc<Mutex<Card>>|
-             -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
-                Box::pin({
-                    async move {
-                        let mana: Vec<GenerateManaAction> = card
-                            .lock()
-                            .await
-                            .triggers
-                            .iter()
-                            .filter(|t| {
-                                t.action
-                                    .as_any()
-                                    .downcast_ref::<GenerateManaAction>()
-                                    .is_some()
-                            })
-                            .map(|x| {
-                                x.action
-                                    .as_any()
-                                    .downcast_ref::<GenerateManaAction>()
-                                    .unwrap()
-                                    .clone()
-                            })
-                            .collect();
-                        let trigger_index = card.lock().await.triggers.len() - 1;
-                        card.lock().await.triggers.remove(trigger_index);
-                        if mana.len() == 1 {
-                            let mana = &mana[0].mana_to_add;
-
-                            card.lock()
-                                .await
-                                .owner
-                                .as_ref()
-                                .unwrap()
-                                .lock()
-                                .await
-                                .pay_mana(mana)
-                                .await?;
-                            card.lock().await.untap();
-                        }
-                        Ok(())
-                    }
-                })
-            },
-        ))),
     )
+    .closure_action(|game, card, target, ability| {
+        Box::pin({
+            async move {
+                let mana: Vec<GenerateManaAction> = card
+                    .lock()
+                    .await
+                    .triggers
+                    .iter()
+                    .filter(|t| {
+                        t.action
+                            .as_any()
+                            .downcast_ref::<GenerateManaAction>()
+                            .is_some()
+                    })
+                    .map(|x| {
+                        x.action
+                            .as_any()
+                            .downcast_ref::<GenerateManaAction>()
+                            .unwrap()
+                            .clone()
+                    })
+                    .collect();
+                let trigger_index = card.lock().await.triggers.len() - 1;
+                card.lock().await.triggers.remove(trigger_index);
+                if mana.len() == 1 {
+                    let mana = &mana[0].mana_to_add;
+
+                    card.lock()
+                        .await
+                        .owner
+                        .as_ref()
+                        .unwrap()
+                        .lock()
+                        .await
+                        .pay_mana(mana)?;
+                    card.lock().await.untap();
+                }
+                Ok(())
+            }
+        })
+    })
+    .build()
 }
 
 #[async_trait::async_trait]
@@ -82,25 +78,23 @@ impl CardAction for GenerateManaAction {
     }
     async fn apply(
         &self,
-        game: &mut Game,
+        game: Arc<Mutex<Game>>,
         card: Arc<Mutex<Card>>,
-        target: EffectTarget,
+        target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
         let owner = card.lock().await.owner.clone().unwrap();
-        if let EffectTarget::Card(card) = target {
-            let game_arc = Arc::new(Mutex::new(std::mem::take(game)));
+        if let Some(FrontendTarget::Card(card)) = &target {
+            let card = Game::card_from_frontend_card_target(&game, card);
             let trigger = Arc::new(Mutex::new(AddTriggerEffect::new(
                 card.clone(),
                 ExpireContract::Steps(1),
                 Some(card.clone()),
                 untap_and_remove(),
-                game_arc.clone(),
+                game.clone(),
             )));
-            let mut game_unlocked = game_arc.lock().await;
-            *game = std::mem::take(&mut *game_unlocked);
 
-            game.effect_manager.add_effect(
+            game.lock().await.effect_manager.add_effect(
                 EffectID(format!(
                     "{}-{}",
                     card.lock().await.id,

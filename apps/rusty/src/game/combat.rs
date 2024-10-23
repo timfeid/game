@@ -1,18 +1,21 @@
 use super::{
     action::{Action, CardActionTarget},
     card::Card,
-    effects::EffectTarget,
+    effects::{Effect, EffectTarget},
     player::Player,
-    Game,
+    FrontendTarget, Game,
 };
-use crate::game::stat::{Stat, StatType, StaticStatId, Stats};
+use crate::game::{
+    card,
+    stat::{Stat, StatType, StaticStatId, Stats},
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Combat {
-    pub attackers: Vec<(Arc<Mutex<Card>>, EffectTarget)>,
+    pub attackers: Vec<(Arc<Mutex<Card>>, FrontendTarget)>,
     pub blockers: Vec<(Arc<Mutex<Card>>, Arc<Mutex<Card>>)>,
 }
 
@@ -25,7 +28,7 @@ impl Combat {
     pub async fn declare_attacker(
         &mut self,
         attacker_card: Arc<Mutex<Card>>,
-        target: EffectTarget,
+        target: FrontendTarget,
     ) {
         let attackers = self.attackers.clone();
         for (index, (attacker, _)) in attackers.iter().enumerate() {
@@ -77,7 +80,25 @@ impl Combat {
         }
     }
 
-    pub async fn resolve_combat(&mut self) -> Vec<Arc<Mutex<Card>>> {
+    pub fn convert_attackers(
+        game: &Arc<Mutex<Game>>,
+        attackers: Vec<(Arc<Mutex<Card>>, FrontendTarget)>,
+    ) -> Vec<(Arc<Mutex<Card>>, EffectTarget)> {
+        attackers
+            .iter()
+            .map(|(attacker, target)| {
+                (
+                    Arc::clone(attacker),
+                    Game::frontend_card_to_effect_target(game, target),
+                )
+            })
+            .collect()
+    }
+
+    pub async fn resolve_combat(
+        &mut self,
+        attackers: Vec<(Arc<Mutex<Card>>, EffectTarget)>,
+    ) -> Vec<Arc<Mutex<Card>>> {
         println!("Resolving combat damage.");
         let mut destroyed_cards = Vec::new();
 
@@ -109,9 +130,7 @@ impl Combat {
                     if blocker_card.get_stat_value(StatType::Regenerate) > 0 {
                         blocker_card.damage_taken = 0;
                         blocker_card.tapped = true;
-                        blocker_card
-                            .remove_stat(StaticStatId::Regenerate.to_string())
-                            .await;
+                        blocker_card.remove_stat(StaticStatId::Regenerate.to_string());
                     } else {
                         destroyed_cards.push(Arc::clone(blocking_card_arc));
                     }
@@ -143,9 +162,7 @@ impl Combat {
                     if attacker_card.get_stat_value(StatType::Regenerate) > 0 {
                         attacker_card.damage_taken = 0;
                         attacker_card.tapped = true;
-                        attacker_card
-                            .remove_stat(StaticStatId::Regenerate.to_string())
-                            .await;
+                        attacker_card.remove_stat(StaticStatId::Regenerate.to_string());
                     } else {
                         destroyed_cards.push(Arc::clone(attacker_card_arc));
                     }
@@ -154,7 +171,7 @@ impl Combat {
         }
 
         // Then, resolve unblocked attackers and handle Trample
-        for (attacker_card_arc, target) in &self.attackers {
+        for (attacker_card_arc, target) in &attackers {
             // Check if this attacker was blocked
             let mut is_blocked = false;
             let mut total_blocker_toughness = 0;
@@ -217,9 +234,7 @@ impl Combat {
                     // self.attackers.first().unwrap().0.lock().await.name
                     Ulid::new()
                 );
-                player
-                    .add_stat(id, Stat::new(StatType::Health, -damage))
-                    .await;
+                player.add_stat(id, Stat::new(StatType::Health, -damage));
                 {
                     attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
                 }
@@ -232,20 +247,20 @@ impl Combat {
 
                 None
             }
-            EffectTarget::Card(card_arc) => {
-                let mut card = card_arc.lock().await;
-                let toughness = card.get_stat_value(StatType::Toughness);
-                card.damage_taken += damage;
+            EffectTarget::Card(card) => {
+                let toughness = card.lock().await.get_stat_value(StatType::Toughness);
+                card.lock().await.damage_taken += damage;
                 println!(
                     "Attacker {} deals {} damage to card {}",
                     attacker_card_arc.lock().await.name,
                     damage,
-                    card.name
+                    card.lock().await.name
                 );
 
-                if card.damage_taken >= toughness {
-                    println!("Card {} is destroyed!", card.name);
-                    Some(Arc::clone(card_arc))
+                let damage_taken = card.lock().await.damage_taken;
+                if damage_taken >= toughness {
+                    println!("Card {} is destroyed!", card.lock().await.name);
+                    Some(Arc::clone(card))
                 } else {
                     None
                 }

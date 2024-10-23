@@ -20,10 +20,10 @@ pub struct Stat {
 }
 #[async_trait::async_trait]
 pub trait Stats: Debug + Send + Sync {
-    async fn add_stat(&mut self, id: String, stat: Stat);
-    async fn remove_stat(&mut self, id: String);
+    fn add_stat(&mut self, id: String, stat: Stat);
+    fn remove_stat(&mut self, id: String);
     fn get_stat_value(&self, stat_type: StatType) -> i16;
-    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16);
+    fn modify_stat(&mut self, stat_type: StatType, intensity: i16);
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Type)]
@@ -95,9 +95,8 @@ impl fmt::Display for StatType {
 
 #[async_trait::async_trait]
 impl Stats for StatManager {
-    async fn add_stat(&mut self, id: String, stat: Stat) {
+    fn add_stat(&mut self, id: String, stat: Stat) {
         self.stats.insert(id, stat);
-        self.notify_listeners().await;
     }
 
     fn get_stat_value(&self, stat_type: StatType) -> i16 {
@@ -109,18 +108,16 @@ impl Stats for StatManager {
             .sum()
     }
 
-    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
+    fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
         for stat in &mut self.stats.values_mut() {
             if stat.stat_type == stat_type {
                 stat.intensity += intensity;
             }
         }
-        self.notify_listeners().await;
     }
 
-    async fn remove_stat(&mut self, id: String) {
+    fn remove_stat(&mut self, id: String) {
         self.stats.remove(&id);
-        self.notify_listeners().await;
     }
 }
 
@@ -140,11 +137,5 @@ impl StatManager {
 
     pub fn add_listener(&mut self, listener: Arc<Box<dyn CardStatChangeListener + Send + Sync>>) {
         self.listeners.push(listener);
-    }
-
-    async fn notify_listeners(&self) {
-        for listener in &self.listeners {
-            listener.on_stat_change(self).await;
-        }
     }
 }

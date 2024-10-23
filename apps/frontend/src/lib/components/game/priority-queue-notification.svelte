@@ -4,20 +4,16 @@
 	export let game: GameState;
 	export let turnMessage: LobbyTurnMessage | undefined;
 
-	$: player =
-		game.public_info.priority_queue?.player_index !== undefined
-			? Object.keys(game.players).find(
-					(p) => game.players[p].player_index === game.public_info.priority_queue!.player_index
-				)
-			: null;
+	$: console.log(game.public_info.priority_queue);
 </script>
 
 {#if game.public_info.priority_queue}
 	<div class="text-center">
-		{player}'s priority queue
+		{game.public_info.priority_queue?.player_id || ''}'s priority queue
 		{game.public_info.priority_queue.time_left}s
 	</div>
-{:else if turnMessage}
+{/if}
+{#if turnMessage}
 	<div
 		class="relative text-center text-xs w-full flex flex-col justify-end h-16 pb-6 overflow-hidden"
 	>

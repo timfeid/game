@@ -42,11 +42,6 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         .mutation("turn", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::turn(ctx, code).await?) })
         })
-        .mutation("attach_card", |t| {
-            t(|ctx, args: ActionCardArgs| async move {
-                Ok(LobbyController::attach_card(ctx, args).await?)
-            })
-        })
         .mutation("respond.mandatory_ability", |t| {
             t(|ctx, args: RespondMandatoryAbility| async move {
                 Ok(LobbyController::respond_mandatory_ability(ctx, args).await?)

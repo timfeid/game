@@ -57,7 +57,7 @@ pub struct Lobby {
 impl Lobby {
     pub async fn get_state(&self) -> PublicGameInfo {
         let priority_queue = {
-            let cloned_game = self.cloned_game().await;
+            let cloned_game = self.cloned_game();
             let game = cloned_game.lock().await;
             if let Some((player, time_left, _)) = &game.current_priority_player {
                 Some(PriorityQueue {
@@ -69,14 +69,15 @@ impl Lobby {
             }
         };
 
+        let combat = self.game.lock().await.combat.clone();
         let blocks = {
             let mut blocks = vec![];
-            let cloned_game = self.cloned_game().await;
-            let game = cloned_game.lock().await;
-            for (blocker, attacker) in game.combat.blockers.iter() {
+            for (blocker, attacker) in combat.blockers.iter() {
                 blocks.push(Block {
-                    attacker: { game.frontend_target_from_card(attacker).await },
-                    blocker: { game.frontend_target_from_card(blocker).await },
+                    attacker: {
+                        Game::frontend_target_from_card(&self.game, attacker).expect("hm")
+                    },
+                    blocker: { Game::frontend_target_from_card(&self.game, blocker).expect("hm") },
                 })
             }
 
@@ -85,7 +86,7 @@ impl Lobby {
 
         let attacks = {
             let mut attacks = vec![];
-            let cloned_game = self.cloned_game().await;
+            let cloned_game = self.cloned_game();
             let game = cloned_game.lock().await;
             if let Some(turn) = game.current_turn.clone() {
                 let player = &turn.current_player;
@@ -95,7 +96,7 @@ impl Lobby {
                     for (attacker, target) in game.combat.attackers.iter() {
                         if Arc::ptr_eq(attacker, card) {
                             attacks.push(Attack {
-                                target: game.frontend_target_from_effect_target(target).await,
+                                target: target.clone(),
                                 attacker: FrontendCardTarget {
                                     player_id: player_id.clone(),
                                     pile: FrontendPileName::Play,
@@ -118,7 +119,7 @@ impl Lobby {
         }
     }
 
-    pub async fn cloned_game(&self) -> Arc<Mutex<Game>> {
+    pub fn cloned_game(&self) -> Arc<Mutex<Game>> {
         Arc::clone(&self.game)
     }
 }
@@ -132,26 +133,21 @@ use ulid::Ulid;
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
 pub enum DeckSelector {
-    Elves,
-    Elves2,
-    Blue,
-    Black,
+    // Elves,
+    // Elves2,
+    // Blue,
+    // Black,
     Angels,
-    Red,
+    // AngelsBlue,
+    // Red,
 }
 
 use crate::{
     error::{AppError, AppResult},
     game::{
-        card::Card,
-        decks::{
-            black::create_black_deck, blue::create_blue_deck, green::create_green_deck,
-            red::create_red_deck, white::create_angels_deck, Deck,
-        },
-        effects::EffectTarget,
-        player::Player,
-        Attack, Block, CardWithDetails, FrontendCardTarget, FrontendPileName, FrontendTarget, Game,
-        GameState, GameStatus, PlayerState, PlayerStatus, PriorityQueue, PublicGameInfo,
+        card::Card, decks::Deck, player::Player, Attack, Block, CardWithDetails,
+        FrontendCardTarget, FrontendPileName, FrontendTarget, Game, GameState, GameStatus,
+        PlayerState, PlayerStatus, PriorityQueue, PublicGameInfo,
     },
     services::jwt::Claims,
 };
@@ -214,11 +210,12 @@ impl Lobby {
 
     pub async fn list_desks(&mut self, user: &Claims) -> Vec<DeckSelector> {
         return vec![
-            DeckSelector::Elves,
-            DeckSelector::Elves2,
+            // DeckSelector::Elves,
+            // DeckSelector::Elves2,
             DeckSelector::Angels,
-            DeckSelector::Black,
-            DeckSelector::Blue,
+            // DeckSelector::Black,
+            // DeckSelector::Blue,
+            // DeckSelector::AngelsBlue,
         ];
     }
 
@@ -273,42 +270,12 @@ impl Lobby {
         self
     }
 
-    pub async fn attach_card(
-        &mut self,
-        player_id: String,
-        in_play_index: usize,
-        target: Option<EffectTarget>,
-    ) -> AppResult<()> {
-        // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        // let player = Arc::clone(&self.game.lock().await.players[player_index]);
-        let mut player = None;
-
-        let players = self.game.lock().await.players.clone();
-
-        for current_player in players {
-            if current_player.lock().await.name == player_id {
-                player = Some(current_player);
-                break;
-            }
-        }
-        if let Some(player) = player {
-            self.game
-                .lock()
-                .await
-                .attach_card_action(&player, in_play_index, target)
-                .await
-                .map_err(|x| AppError::BadRequest(x))?;
-        }
-
-        Ok(())
-    }
-
     pub async fn respond_card_selection(
         &mut self,
         player: Arc<Mutex<Player>>,
-        target: Option<EffectTarget>,
+        target: Option<FrontendTarget>,
     ) -> AppResult<()> {
-        Game::respond_card_selection(self.game.clone(), &player, target)
+        Game::respond_card_selection(&self.game, &player, target)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 
@@ -319,9 +286,9 @@ impl Lobby {
         &mut self,
         ability_id: String,
         player: Arc<Mutex<Player>>,
-        target: Option<EffectTarget>,
+        target: Option<FrontendTarget>,
     ) -> AppResult<()> {
-        Game::respond_player_ability(self.game.clone(), &player, ability_id, true, target)
+        Game::respond_player_ability(&self.game, &player, ability_id, true, target)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 
@@ -332,10 +299,10 @@ impl Lobby {
         &mut self,
         ability_id: String,
         player: Arc<Mutex<Player>>,
-        target: Option<EffectTarget>,
+        target: Option<FrontendTarget>,
         response: bool,
     ) -> AppResult<()> {
-        Game::respond_player_ability(self.game.clone(), &player, ability_id, response, target)
+        Game::respond_player_ability(&self.game, &player, ability_id, response, target)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 
@@ -345,32 +312,11 @@ impl Lobby {
     pub async fn action_card(
         &mut self,
         frontend_card: FrontendCardTarget,
-        target: Option<EffectTarget>,
+        target: Option<FrontendTarget>,
         trigger_id: String,
     ) -> AppResult<()> {
         // let current_player = Arc::clone(&self.game.current_turn.as_ref().unwrap().current_player);
-        let mut player;
-        let players = self.game.lock().await.players.clone();
-        for (index, current_player) in players.iter().enumerate() {
-            if current_player.lock().await.name == frontend_card.player_id {
-                player = Arc::clone(current_player);
-                Game::activate_card_action(&self.game, &player, frontend_card, target, trigger_id)
-                    .await
-                    .map_err(|x| AppError::BadRequest(x))?;
-                break;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn play_card(
-        &mut self,
-        player: Arc<Mutex<Player>>,
-        index: usize,
-        target: Option<EffectTarget>,
-    ) -> AppResult<()> {
-        Game::play_card_from_hand(&self.game, &player, index, target)
+        Game::activate_card_action(&self.game, frontend_card, target, trigger_id)
             .await
             .map_err(|x| AppError::BadRequest(x))?;
 
@@ -378,7 +324,7 @@ impl Lobby {
     }
 
     pub async fn advance_turn(&mut self) {
-        self.game.lock().await.advance_turn().await;
+        Game::advance_turn(&self.game).await;
     }
 
     pub async fn start_game(&mut self) {
