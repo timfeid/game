@@ -80,19 +80,19 @@ impl Combat {
         }
     }
 
-    pub fn convert_attackers(
+    pub async fn convert_attackers(
         game: &Arc<Mutex<Game>>,
         attackers: Vec<(Arc<Mutex<Card>>, FrontendTarget)>,
     ) -> Vec<(Arc<Mutex<Card>>, EffectTarget)> {
-        attackers
-            .iter()
-            .map(|(attacker, target)| {
-                (
-                    Arc::clone(attacker),
-                    Game::frontend_card_to_effect_target(game, target),
-                )
-            })
-            .collect()
+        let mut response: Vec<(Arc<Mutex<Card>>, EffectTarget)> = vec![];
+        for (attacker, target) in attackers.iter() {
+            response.push((
+                Arc::clone(attacker),
+                Game::frontend_card_to_effect_target(game, target).await,
+            ));
+        }
+
+        response
     }
 
     pub async fn resolve_combat(

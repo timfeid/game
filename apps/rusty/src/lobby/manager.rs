@@ -245,11 +245,11 @@ impl LobbyManager {
         // TODO: check if current turn is user's turn..
         {
             let hash_map = self.lobbies.lock().await;
-            let lobby = hash_map.get(lobby_id)?;
+            let lobby = Arc::clone(hash_map.get(lobby_id)?);
+            // let lobby = lobby.lock().await;
             lobby.lock().await.advance_turn().await;
         }
         // lobby.lock().await.message(user, args.text);
-        self.notify_lobby(lobby_id).await.ok();
 
         Some(())
     }
@@ -261,14 +261,11 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let mut lobby = lobby.lock().await;
             lobby
-                .lock()
-                .await
                 .action_card(args.card, args.target, args.trigger_id)
                 .await?;
         }
-        // lobby.lock().await.message(user, args.text);
-        self.notify_lobby(&lobby_id).await.ok();
 
         Ok(())
     }

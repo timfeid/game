@@ -230,7 +230,7 @@ pub struct Card {
 }
 
 impl Card {
-    pub fn abilities(
+    pub async fn abilities(
         &self,
         turn_phase: TurnPhase,
         in_play: bool,
@@ -330,9 +330,7 @@ impl Card {
                     let mut player_id = None;
 
                     if let Some(owner) = &self.owner {
-                        if let Ok(owner) = owner.try_lock() {
-                            player_id = Some(owner.name.clone());
-                        }
+                        player_id = Some(owner.lock().await.name.clone());
                     }
 
                     if &turn_phase == &TurnPhase::Main {
@@ -362,8 +360,8 @@ impl Card {
                     let mut is_owner = false;
                     if let Some(game) = &game_arc {
                         if let Some(current_player) = game
-                            .try_lock()
-                            .expect("unable to lock player")
+                            .lock()
+                            .await
                             .current_turn
                             .as_ref()
                             .map(|t| t.current_player.clone())
@@ -394,53 +392,35 @@ impl Card {
                         })
                         .unwrap_or(true);
 
-                    let can_pay_mana = self
-                        .owner
-                        .as_ref()
-                        .and_then(|o| {
-                            Some(
-                                o.try_lock()
-                                    .and_then(|o| Ok(o.can_pay_mana(required_mana)))
-                                    .unwrap_or(false),
-                            )
-                        })
-                        .unwrap_or(false);
+                    let can_pay_mana = if let Some(owner) = self.owner.as_ref() {
+                        owner.lock().await.can_pay_mana(required_mana)
+                    } else {
+                        false
+                    };
 
-                    let player_id = self.owner.as_ref().and_then(|o| {
-                        Some(
-                            o.try_lock()
-                                .and_then(|o| Ok(o.name.clone()))
-                                .unwrap_or_default(),
-                        )
-                    });
+                    let player_id = if let Some(owner) = self.owner.as_ref() {
+                        Some(owner.lock().await.name.clone())
+                    } else {
+                        None
+                    };
 
-                    let meets_mana_requirements = self
-                        .owner
-                        .as_ref()
-                        .and_then(|o| {
-                            Some(
-                                o.try_lock()
-                                    .and_then(|o| Ok(o.has_required_mana(required_mana)))
-                                    .unwrap_or(false),
-                            )
-                        })
-                        .unwrap_or(false);
+                    let meets_mana_requirements = if let Some(owner) = self.owner.as_ref() {
+                        owner.lock().await.has_required_mana(required_mana)
+                    } else {
+                        false
+                    };
+
                     // if can_pay_mana && within_phase {
                     let mut meets_requirements_except_mana = within_phase
                         && in_play
                         && ((!self.tapped && self.current_phase == CardPhase::Ready)
                             || !required_tap);
 
-                    if let Some(card) = &original_card_arc {
-                        if let Some(game) = &game_arc {
-                            if let Ok(card) = card.try_lock() {
-                                meets_requirements_except_mana = meets_requirements_except_mana
-                                    && (&trigger.requirements)(
-                                        game,
-                                        &card,
-                                        Some(trigger.id.clone()),
-                                    );
-                            }
+                    if let Some(card) = original_card_arc.clone() {
+                        if let Some(game) = game_arc.clone() {
+                            meets_requirements_except_mana = meets_requirements_except_mana
+                                && (&trigger.requirements)(game, card, Some(trigger.id.clone()))
+                                    .await;
                         }
                     }
 
@@ -482,8 +462,8 @@ impl Card {
                 is_owner = Arc::ptr_eq(
                     &self.owner.clone().unwrap(),
                     &game
-                        .try_lock()
-                        .unwrap()
+                        .lock()
+                        .await
                         .current_turn
                         .as_ref()
                         .unwrap()
@@ -507,11 +487,9 @@ impl Card {
                 .unwrap_or(true);
             let meets_requirements_except_mana = within_phase;
             if let Some(owner) = &self.owner {
-                if let Ok(owner) = owner.try_lock() {
-                    meets_mana_requirements = owner.has_required_mana(&self.cost);
-                    can_pay_mana = owner.can_pay_mana(&self.cost);
-                    player_id = Some(owner.name.clone());
-                }
+                meets_mana_requirements = owner.lock().await.has_required_mana(&self.cost);
+                can_pay_mana = owner.lock().await.can_pay_mana(&self.cost);
+                player_id = Some(owner.lock().await.name.clone());
             }
             abilities.push(AbilityDetails {
                 id: "play_card".to_string(),
@@ -733,13 +711,18 @@ impl Card {
         let turn_phase = game.lock().await.current_phase();
 
         let triggers = {
-            card_arc.lock().await.abilities(
-                turn_phase,
-                in_play,
-                Some(card_arc.clone()),
-                Some(Arc::clone(game)),
-            )
+            card_arc
+                .lock()
+                .await
+                .abilities(
+                    turn_phase,
+                    in_play,
+                    Some(card_arc.clone()),
+                    Some(Arc::clone(game)),
+                )
+                .await
         };
+
         for action_trigger in &triggers {
             if action_trigger.id == trigger_id {
                 mana_requirements = action_trigger.mana_cost.clone();

@@ -388,16 +388,15 @@ impl Player {
         println!("{}'s priority turn ends.", self.name);
     }
 
-    pub fn filter_cards_in_play<F>(&self, closure: F) -> Vec<Arc<Mutex<Card>>>
+    pub async fn filter_cards_in_play<F>(&self, closure: F) -> Vec<Arc<Mutex<Card>>>
     where
         F: Fn(&Card) -> bool + 'static + Send + Sync,
     {
         let mut cards = vec![];
         for card_arc in &self.cards_in_play {
-            if let Ok(card) = card_arc.try_lock() {
-                if (closure)(&card) {
-                    cards.push(card_arc.clone());
-                }
+            let card = card_arc.lock().await;
+            if (closure)(&card) {
+                cards.push(card_arc.clone());
             }
         }
 

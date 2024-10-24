@@ -57,8 +57,7 @@ pub struct Lobby {
 impl Lobby {
     pub async fn get_state(&self) -> PublicGameInfo {
         let priority_queue = {
-            let cloned_game = self.cloned_game();
-            let game = cloned_game.lock().await;
+            let game = self.game.lock().await;
             if let Some((player, time_left, _)) = &game.current_priority_player {
                 Some(PriorityQueue {
                     player_id: player.lock().await.name.clone(),
@@ -75,9 +74,15 @@ impl Lobby {
             for (blocker, attacker) in combat.blockers.iter() {
                 blocks.push(Block {
                     attacker: {
-                        Game::frontend_target_from_card(&self.game, attacker).expect("hm")
+                        Game::frontend_target_from_card(&self.game, attacker)
+                            .await
+                            .expect("hm")
                     },
-                    blocker: { Game::frontend_target_from_card(&self.game, blocker).expect("hm") },
+                    blocker: {
+                        Game::frontend_target_from_card(&self.game, blocker)
+                            .await
+                            .expect("hm")
+                    },
                 })
             }
 
@@ -324,7 +329,10 @@ impl Lobby {
     }
 
     pub async fn advance_turn(&mut self) {
-        Game::advance_turn(&self.game).await;
+        let game = self.game.clone();
+        tokio::spawn(async move {
+            Game::advance_turn(&game).await;
+        });
     }
 
     pub async fn start_game(&mut self) {

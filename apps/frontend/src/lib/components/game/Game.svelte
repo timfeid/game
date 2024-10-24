@@ -80,7 +80,7 @@
 		}
 		unsubscribe = websocketClient.addSubscription(['lobby.subscribe', [code, accessToken]], {
 			onData(data) {
-				// console.log(data);
+				console.log(data);
 				if (isUpdated(data)) {
 					return updated(data.Updated);
 				}

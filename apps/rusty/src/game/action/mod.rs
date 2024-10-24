@@ -187,7 +187,7 @@ impl CardAction for PlayCardAction {
                 card.lock().await.name
             ));
         } else {
-            if let Ok(frontend_target) = Game::frontend_target_from_card(&game, &card) {
+            if let Ok(frontend_target) = Game::frontend_target_from_card(&game, &card).await {
                 game.lock()
                     .await
                     .remove_from_frontend_target(&frontend_target)
@@ -210,7 +210,7 @@ impl CardAction for PlayCardAction {
 
             println!("instant actions? {:?}", actions);
 
-            Game::execute_actions(&game, actions).await?;
+            Game::execute_actions(game.clone(), actions).await?;
 
             // Handle special cases, e.g., if the card is a land
             {
@@ -305,7 +305,15 @@ pub struct CardActionTrigger {
     pub trigger_type: ActionTriggerType,
     pub action: Arc<dyn CardAction + Send + Sync>,
     pub card_required_target: CardRequiredTarget,
-    pub requirements: Arc<dyn Fn(&Arc<Mutex<Game>>, &Card, Option<String>) -> bool + Send + Sync>,
+    pub requirements: Arc<
+        dyn Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Option<String>,
+            ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+            + Send
+            + Sync,
+    >,
 }
 
 impl Debug for CardActionTrigger {
@@ -324,7 +332,15 @@ impl CardActionTrigger {
         trigger_type: ActionTriggerType,
         card_required_target: CardRequiredTarget,
         action: Arc<dyn CardAction + Send + Sync>,
-        requirements: Arc<dyn Fn(&Arc<Mutex<Game>>, &Card, Option<String>) -> bool + Send + Sync>,
+        requirements: Arc<
+            dyn Fn(
+                    Arc<Mutex<Game>>,
+                    Arc<Mutex<Card>>,
+                    Option<String>,
+                ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+                + Send
+                + Sync,
+        >,
     ) -> Self {
         Self {
             id: Ulid::new().to_string(),
@@ -657,7 +673,7 @@ impl CardAction for CardDamageAction {
         if let Some(target) = &target {
             match target {
                 FrontendTarget::Player(player_id) => {
-                    let (_, target) = Game::player_from_frontend_target(&game, target)?;
+                    let (_, target) = Game::player_from_frontend_target(&game, target).await?;
 
                     let stats = &mut target.lock().await.stat_manager;
                     let offense = card.get_stat_value(StatType::Power);
@@ -1400,7 +1416,15 @@ pub struct ActionBuilder {
     trigger_type: ActionTriggerType,
     target: CardRequiredTarget,
     action: Option<Arc<dyn CardAction + Send + Sync>>,
-    requirements: Arc<dyn Fn(&Arc<Mutex<Game>>, &Card, Option<String>) -> bool + Send + Sync>,
+    requirements: Arc<
+        dyn Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Option<String>,
+            ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+            + Send
+            + Sync,
+    >,
 }
 
 impl ActionBuilder {
@@ -1409,7 +1433,7 @@ impl ActionBuilder {
             trigger_type,
             target,
             action: None,
-            requirements: Arc::new(|_, _, _| true),
+            requirements: Arc::new(|_, _, _| Box::pin(async move { true })),
         }
     }
 
@@ -1439,7 +1463,14 @@ impl ActionBuilder {
 
     pub fn requirements<F>(mut self, requirements: F) -> Self
     where
-        F: Fn(&Arc<Mutex<Game>>, &Card, Option<String>) -> bool + 'static + Send + Sync,
+        F: Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Option<String>,
+            ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+            + 'static
+            + Send
+            + Sync,
     {
         self.requirements = Arc::new(requirements);
         self

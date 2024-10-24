@@ -135,7 +135,7 @@ pub fn create_ossification() -> Card {
                 Box::pin(async move {
                     source_card.lock().await.attached = target.and_then(|target| Some(Game::card_from_frontend_target(&game, &target)));
 
-                    Game::execute_actions(&game, vec![Arc::new(CardActionWrapper {
+                    Game::execute_actions(game.clone(), vec![Arc::new(CardActionWrapper {
                         ability_id: None,
                         card: source_card.clone(),
                         action: Arc::new(CastMandatoryAdditionalAbility {
@@ -167,32 +167,30 @@ pub fn create_ossification() -> Card {
                 })
             })
             .requirements(|game, source, _| {
-                if let Some(owner) = source.owner.clone() {
-                    // Check if an opponent has a creature or planeswalker in play
-                    let owner_cloned = owner.clone();
-                    let opponent_has_creature_or_pw = game.try_lock().expect("Unable to lock game")
-                        .filter_cards_in_play(move |card_in_play| {
-                            if let Some(card_owner) = &card_in_play.owner {
-                                !Arc::ptr_eq(&owner_cloned, card_owner) && card_in_play.card_type == CardType::Creature
-                            } else {
-                                false
-                            }
-                        }).len() > 0;
+                Box::pin(async move {
+                    if let Some(owner) = { source.lock().await.owner.clone() } {
+                        // Check if an opponent has a creature or planeswalker in play
+                        let owner_cloned = owner.clone();
+                        let opponent_has_creature_or_pw = game.try_lock().expect("Unable to lock game")
+                            .filter_cards_in_play(move |card_in_play| {
+                                if let Some(card_owner) = &card_in_play.owner {
+                                    !Arc::ptr_eq(&owner_cloned, card_owner) && card_in_play.card_type == CardType::Creature
+                                } else {
+                                    false
+                                }
+                            }).await.len() > 0;
 
-                    // Check if the owner has a basic land in play
-                    let has_basic_land = if let Ok(owner_guard) = owner.clone().try_lock() {
-                        owner_guard.filter_cards_in_play(|card| {
+                        // Check if the owner has a basic land in play
+                        let has_basic_land = owner.lock().await.filter_cards_in_play(|card| {
                             matches!(card.card_type, CardType::BasicLand(_))
-                        }).len() > 0
+                        }).await.len() > 0;
+
+                        // Both conditions must be true
+                        has_basic_land && opponent_has_creature_or_pw
                     } else {
                         false
-                    };
-
-                    // Both conditions must be true
-                    has_basic_land && opponent_has_creature_or_pw
-                } else {
-                    false
-                }
+                    }
+                })
             })
         )
         .mana_cost(vec![ManaType::Colorless, ManaType::White])
@@ -545,7 +543,9 @@ fn create_lunarch_veteran() -> Card {
             )
             .closure_action(|game, source, target, ability_id| {
                 Box::pin(async move {
-                    let target = Game::frontend_target_from_card(&game, &source).expect("hm");
+                    let target = Game::frontend_target_from_card(&game, &source)
+                        .await
+                        .expect("hm");
                     let (owner, card_type) = {
                         let card = source.lock().await;
                         let owner = card.owner.clone().unwrap();

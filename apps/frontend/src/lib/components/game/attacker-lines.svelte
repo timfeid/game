@@ -36,64 +36,64 @@
 
 			const endDiv = document.querySelector(selector);
 
-			if (startDiv && endDiv) {
-				const attacker = startDiv.getBoundingClientRect();
-				const receiver = endDiv.getBoundingClientRect();
+			// if (startDiv && endDiv) {
+			// 	const attacker = startDiv.getBoundingClientRect();
+			// 	const receiver = endDiv.getBoundingClientRect();
 
-				// Convert absolute screen coordinates to container coordinates
-				const startX = attacker.left + attacker.width / 2 - containerRect.left;
-				const startY = attacker.top + attacker.height / 2 - containerRect.top;
-				const endX = receiver.left + receiver.width / 2 - containerRect.left;
-				const endY = receiver.top + receiver.height / 2 - containerRect.top;
+			// 	// Convert absolute screen coordinates to container coordinates
+			// 	const startX = attacker.left + attacker.width / 2 - containerRect.left;
+			// 	const startY = attacker.top + attacker.height / 2 - containerRect.top;
+			// 	const endX = receiver.left + receiver.width / 2 - containerRect.left;
+			// 	const endY = receiver.top + receiver.height / 2 - containerRect.top;
 
-				// Define the path for the particles to follow using Bezier curve
-				const pathString = `M${startX},${startY} C${startX + 100},${startY} ${endX - 100},${endY} ${endX},${endY}`;
+			// 	// Define the path for the particles to follow using Bezier curve
+			// 	const pathString = `M${startX},${startY} C${startX + 100},${startY} ${endX - 100},${endY} ${endX},${endY}`;
 
-				// Create an SVG element to define the path for motion
-				const svgNamespace = 'http://www.w3.org/2000/svg';
-				const svg = document.createElementNS(svgNamespace, 'svg');
-				const path = document.createElementNS(svgNamespace, 'path');
-				path.setAttribute('d', pathString);
-				path.setAttribute('fill', 'none');
-				svg.appendChild(path);
-				container.appendChild(svg);
+			// 	// Create an SVG element to define the path for motion
+			// 	const svgNamespace = 'http://www.w3.org/2000/svg';
+			// 	const svg = document.createElementNS(svgNamespace, 'svg');
+			// 	const path = document.createElementNS(svgNamespace, 'path');
+			// 	path.setAttribute('d', pathString);
+			// 	path.setAttribute('fill', 'none');
+			// 	svg.appendChild(path);
+			// 	container.appendChild(svg);
 
-				// Create div particles instead of SVG
-				for (let i = 0; i < 30; i++) {
-					const particle = document.createElement('div');
-					particle.classList.add(`particle-${index}-${i}`, 'dot');
+			// 	// Create div particles instead of SVG
+			// 	for (let i = 0; i < 30; i++) {
+			// 		const particle = document.createElement('div');
+			// 		particle.classList.add(`particle-${index}-${i}`, 'dot');
 
-					var size = anime.random(2, 8);
+			// 		var size = anime.random(2, 8);
 
-					particle.style.width = size + 'px';
-					particle.style.height = size + 'px';
-					container.appendChild(particle);
+			// 		particle.style.width = size + 'px';
+			// 		particle.style.height = size + 'px';
+			// 		container.appendChild(particle);
 
-					// Get a random initial progress (0 to 1) along the path
-					const initialProgress = Math.random();
-					const motionPath = anime.path(path);
+			// 		// Get a random initial progress (0 to 1) along the path
+			// 		const initialProgress = Math.random();
+			// 		const motionPath = anime.path(path);
 
-					// Set the particle's initial position using the random progress
-					particle.style.transform = `translate(${motionPath('x', { progress: initialProgress })}px, ${motionPath('y', { progress: initialProgress })}px)`;
+			// 		// Set the particle's initial position using the random progress
+			// 		particle.style.transform = `translate(${motionPath('x', { progress: initialProgress })}px, ${motionPath('y', { progress: initialProgress })}px)`;
 
-					// Animate the particle to move along the path
-					anime({
-						targets: `.particle-${index}-${i}`,
-						opacity: [
-							{ value: 1, duration: 100, easing: 'easeInSine' }, // Fade in
-							{ value: 0.3, duration: anime.random(1000, 3000), easing: 'easeOutSine' } // Fade out
-						],
-						width: anime.random(0, 6),
-						height: anime.random(0, 6),
-						duration: anime.random(1500, 4000), // Control speed for each dot
-						loop: true,
-						easing: 'easeInOutSine',
-						delay: anime.stagger(300), // Stagger each particle's appearance for a smoother effect
-						translateX: motionPath('x'),
-						translateY: motionPath('y')
-					});
-				}
-			}
+			// 		// Animate the particle to move along the path
+			// 		anime({
+			// 			targets: `.particle-${index}-${i}`,
+			// 			opacity: [
+			// 				{ value: 1, duration: 100, easing: 'easeInSine' }, // Fade in
+			// 				{ value: 0.3, duration: anime.random(1000, 3000), easing: 'easeOutSine' } // Fade out
+			// 			],
+			// 			width: anime.random(0, 6),
+			// 			height: anime.random(0, 6),
+			// 			duration: anime.random(1500, 4000), // Control speed for each dot
+			// 			loop: true,
+			// 			easing: 'easeInOutSine',
+			// 			delay: anime.stagger(300), // Stagger each particle's appearance for a smoother effect
+			// 			translateX: motionPath('x'),
+			// 			translateY: motionPath('y')
+			// 		});
+			// 	}
+			// }
 		}
 	}
 </script>
