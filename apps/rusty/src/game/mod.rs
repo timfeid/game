@@ -1094,7 +1094,7 @@ impl Game {
 
         Game::execute_actions(Arc::clone(game), actions).await.ok();
         for card in destroyed_cards {
-            Game::destroy_card(&game, &card).await;
+            Game::destroy_card(&game, &card).await.ok();
         }
     }
 
@@ -1102,7 +1102,7 @@ impl Game {
         game: &Arc<Mutex<Game>>,
         card: &Arc<Mutex<Card>>,
     ) -> Result<(), String> {
-        game.lock().await.remove_references_to(card);
+        game.lock().await.remove_references_to(card).await;
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
         let owner = card.lock().await.owner.clone();
         if let Some(card_owner) = &owner {
@@ -1319,7 +1319,7 @@ impl Game {
         game: &Arc<Mutex<Game>>,
         card: &Arc<Mutex<Card>>,
     ) -> Result<(), String> {
-        game.lock().await.remove_references_to(card);
+        game.lock().await.remove_references_to(card).await;
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
         let owner = card.lock().await.owner.clone();
         if let Some(card_owner) = &owner {

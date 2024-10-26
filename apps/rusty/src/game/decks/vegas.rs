@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use rand::rngs::SmallRng;
+use rand::{seq::SliceRandom, Rng, SeedableRng};
 
 use tokio::sync::Mutex;
 use ulid::Ulid;
@@ -13,7 +14,7 @@ use crate::game::{
     mana::ManaType,
     stat::{StatType, Stats},
     turn::TurnPhase,
-    Game,
+    FrontendTarget, Game,
 };
 
 use super::duplicate_card;
@@ -153,6 +154,70 @@ fn create_lucky_gambler() -> Card {
         .build()
 }
 
+fn create_blackjack_dealer() -> Card {
+    CardBuilder::new()
+        .name("Blackjack Dealer")
+        .description("When Blackjack Dealer enters the battlefield, each player draws a card.")
+        .creature(2, 2)
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
+                |game, source, player, target, _| {
+                    Box::pin(async move {
+                        let players = game.lock().await.players.clone();
+                        for player in players {
+                            player.lock().await.draw_card();
+                        }
+                        Ok(())
+                    })
+                },
+            ),
+        )
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Pay 1 Luck Token, Tap: Target player discards a random card.".to_string(),
+                vec![],
+                None,
+                true,
+                CardRequiredTarget::AnyPlayer,
+            ))
+            .closure_action(|game, source, owner, target, ability_id| {
+                Box::pin(async move {
+                    if let Ok((_, player)) =
+                        Game::player_from_frontend_target(&game, &target.unwrap()).await
+                    {
+                        let cards_in_hand = player.lock().await.cards_in_hand.clone();
+
+                        if !cards_in_hand.is_empty() {
+                            Game::add_stat(&game, &source, &owner, StatType::LuckToken, -1).await;
+                            let mut rng = SmallRng::from_entropy();
+
+                            if let Some(card) = cards_in_hand.choose(&mut rng) {
+                                if let Ok(target) =
+                                    Game::frontend_target_from_card(&game, card).await
+                                {
+                                    game.lock().await.remove_from_frontend_target(&target).await;
+                                    return Ok(());
+                                } else {
+                                    return Err("Hmm".to_string());
+                                }
+                            } else {
+                                return Err("Failed to select a card".into());
+                            }
+                        } else {
+                            return Err("Target player has no cards in play".into());
+                        }
+                    } else {
+                        return Err("Invalid target: Expected a player".into());
+                    }
+                })
+            })
+            .requirements(|game, source, owner, ability_id| {
+                Box::pin(async move { owner.lock().await.get_stat_value(StatType::LuckToken) > 0 })
+            }),
+        )
+        .build()
+}
+
 fn create_casino_grounds() -> Card {
     CardBuilder::new()
         .name("Casino Grounds")
@@ -212,8 +277,9 @@ pub fn create_vegas_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_casino_grounds(), 4));
     deck.append(&mut duplicate_card(create_showgirl_performer(), 4));
     deck.append(&mut duplicate_card(create_test_red(), 1));
-    deck.append(&mut duplicate_card(create_high_roller(), 4));
-    deck.append(&mut duplicate_card(create_casino_grounds(), 1));
+    // deck.append(&mut duplicate_card(create_high_roller(), 4));
+    deck.append(&mut duplicate_card(create_blackjack_dealer(), 4));
+    // deck.append(&mut duplicate_card(create_casino_grounds(), 1));
 
     deck
 }

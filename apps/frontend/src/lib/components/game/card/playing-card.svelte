@@ -148,6 +148,9 @@
 				manaTypeOne = card.card_type.BasicLand;
 				manaTypeTwo = card.card_type.BasicLand;
 			}
+		} else {
+			manaTypeOne = null;
+			manaTypeTwo = null;
 		}
 	}
 

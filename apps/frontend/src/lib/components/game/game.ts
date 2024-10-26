@@ -175,6 +175,9 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 				}
 			} else if (isPlayer(frontendTarget)) {
 				console.log("it's a player,", frontendTarget);
+				if (ability.required_target === 'AnyPlayer') {
+					return resolve(frontendTarget);
+				}
 				if (ability.required_target === 'EnemyCardOrPlayer') {
 					return resolve(frontendTarget);
 				}
