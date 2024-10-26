@@ -37,6 +37,7 @@ pub struct StatManager {
 pub enum StatType {
     Health,
     Power,
+    LuckToken,
     Toughness,
     Trample,
     Lifelink,

@@ -75,7 +75,7 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 		toast.info('Please select your target');
 		target.set(null);
 		target.subscribe((frontendTarget) => {
-			console.log(game, game.players);
+			console.log('FRONTEND TARGET', frontendTarget);
 			if (isCard(frontendTarget)) {
 				const targetPlayer = game.players[frontendTarget.Card.player_id];
 				let pile;

@@ -106,7 +106,7 @@ impl EffectManager {
         }
     }
 
-    pub fn has_effects(&self, source_card: &Arc<Mutex<Card>>) -> bool {
+    pub async fn has_effects(&self, source_card: &Arc<Mutex<Card>>) -> bool {
         let effect_entries: Vec<(EffectID, Arc<Mutex<dyn Effect + Send + Sync>>)> = self
             .effects
             .iter()
@@ -114,11 +114,9 @@ impl EffectManager {
             .collect();
 
         for (effect_id, effect_arc) in effect_entries {
-            if let Ok(effect) = effect_arc.try_lock() {
-                if let Some(effect_source_card) = effect.get_source_card() {
-                    if Arc::ptr_eq(effect_source_card, source_card) {
-                        return true;
-                    }
+            if let Some(effect_source_card) = effect_arc.lock().await.get_source_card() {
+                if Arc::ptr_eq(effect_source_card, source_card) {
+                    return true;
                 }
             }
         }

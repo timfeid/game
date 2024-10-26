@@ -22,7 +22,7 @@ use crate::game::card::Card;
 use crate::game::effects::EffectTarget;
 use crate::game::mana::ManaType;
 use crate::game::player::Player;
-use crate::game::stat::Stats;
+use crate::game::stat::{StatType, Stats};
 use crate::game::{
     ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
 };
@@ -447,9 +447,10 @@ impl LobbyManager {
                         player.public_info.hand_size = hand.len() as i32;
                         player.public_info.cards_in_play = cards_in_play;
                         player.public_info.mana_pool = game_player.mana_pool.clone();
-                        player.public_info.health = game_player
-                            .stat_manager
-                            .get_stat_value(crate::game::stat::StatType::Health);
+                        player.public_info.luck_tokens =
+                            game_player.stat_manager.get_stat_value(StatType::LuckToken);
+                        player.public_info.health =
+                            game_player.stat_manager.get_stat_value(StatType::Health);
                     }
                     player.hand = hand;
                 }

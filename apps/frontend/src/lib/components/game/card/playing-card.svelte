@@ -11,15 +11,15 @@
 		ManaType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
-	import ManaBubble from './mana-bubble/mana-bubble.svelte';
-	import Ability from './card/ability.svelte';
-	import { searchingForTarget, target, waitForTarget } from './game';
-	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
-	import { user } from '../../stores/access-token';
+	import ManaBubble from '../mana-bubble/mana-bubble.svelte';
+	import Ability from './ability.svelte';
+	import { searchingForTarget, target, waitForTarget } from '../game';
+	import { selectedAbility, selectFromAbilities } from '../../../stores/dialog';
+	import { user } from '../../../stores/access-token';
 	import { toast } from 'svelte-sonner';
-	import { client } from '../../client';
+	import { client } from '../../../client';
 	import { RSPCError } from '@rspc/client';
-	import ManaBubbleList from './mana-bubble/mana-bubble-list.svelte';
+	import ManaBubbleList from '../mana-bubble/mana-bubble-list.svelte';
 
 	export let cardWithDetails: CardWithDetails;
 	export let game: GameState | undefined = undefined;
@@ -29,6 +29,8 @@
 	export let className: string = '';
 	export { className as class };
 	export let noTooltips = false;
+
+	let showAttachments = true;
 
 	$: card = cardWithDetails.card;
 
@@ -179,12 +181,18 @@
 	on:click={actionCard}
 	class:rotate-90={card.tapped}
 	class:scale-75={card.tapped}
+	class:has-attachments={$$slots.default}
 	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
 	data-player-id={cardWithDetails.frontend_target.player_id}
 	in:fly={{ y: '-300%', duration: 500 }}
 >
+	{#if $$slots.default}
+		<div class="attachment-wrapper" transition:fly={{ y: 100, duration: 300 }}>
+			<slot />
+		</div>
+	{/if}
 	<div
 		class:defending={game?.public_info.blocks.find(
 			(a) =>
@@ -202,7 +210,7 @@
 		)}
 	></div>
 	<div
-		class="relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
+		class="card-main relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
 	>
 		<div
 			class="card-header flex items-center justify-between w-full py-0.5 px-2 w-full"
@@ -322,6 +330,23 @@
 		}
 	}
 
+	button:hover > .card-main {
+		transform: scale(1.05);
+	}
+
+	button:hover > .attachment-wrapper {
+		transform: translateX(0);
+		opacity: 1;
+	}
+
+	.card-main {
+		position: relative;
+		overflow: hidden;
+		border-radius: 10px;
+		border: 3px solid gray;
+		transition: transform 0.2s ease;
+	}
+
 	.defending {
 		position: absolute;
 		top: -10px;
@@ -393,5 +418,32 @@
 	.attacking::after {
 		filter: blur(20px);
 		animation-duration: 7s;
+	}
+	.has-attachments {
+		border-color: red !important;
+		box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+		animation: pulse 2s infinite alternate;
+	}
+	.attachment-wrapper {
+		position: absolute;
+		top: 0;
+		left: 100%;
+		transform: translateX(-100%);
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		opacity: 0;
+		transition:
+			transform 0.3s ease,
+			opacity 0.3s ease;
+	}
+
+	@keyframes pulse {
+		0% {
+			box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+		}
+		100% {
+			box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+		}
 	}
 </style>

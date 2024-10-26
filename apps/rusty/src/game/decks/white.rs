@@ -3,8 +3,8 @@ use crate::game::{
         generate_mana::GenerateManaAction, Action, ActionBuilder, ActionTriggerType,
         ApplyDynamicEffectToCard, AsyncClosureAction, CardAction, CardActionTarget,
         CardActionTrigger, CardActionWrapper, CardRequiredTarget, CardTargetTeam,
-        CastMandatoryAdditionalAbility, DeclareAttackerAction, DeclareBlockerAction, PhaseTarget,
-        PlayCardAction, PlayerActionTarget,
+        CastMandatoryAdditionalAbility, CounterSpellAction, DeclareAttackerAction,
+        DeclareBlockerAction, PhaseTarget, PlayCardAction, PlayerActionTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
@@ -33,15 +33,13 @@ fn create_test_plains() -> Card {
         .description("")
         .card_type(CardType::BasicLand(ManaType::White))
         .add_action(
-            ActionBuilder::new(
-                ActionTriggerType::AbilityWithinPhases(
-                    "Adds {W} white mana to your pool.".to_string(),
-                    vec![],
-                    None,
-                    true,
-                ),
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Adds {W} white mana to your pool.".to_string(),
+                vec![],
+                None,
+                true,
                 CardRequiredTarget::None,
-            )
+            ))
             .action(GenerateManaAction {
                 mana_to_add: vec![
                     ManaType::White,
@@ -111,10 +109,13 @@ pub fn create_angels_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_plains(), 22));
 
     deck.append(&mut duplicate_card(create_test_plains(), 1));
+    // deck.append(&mut duplicate_card(create_test_card(), 4));
     // deck.append(&mut duplicate_card(create_ossification(), 7));
     // deck.append(&mut duplicate_card(create_skyclave_apparition(), 4));
-    deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
-    deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
+    deck.append(&mut duplicate_card(create_skyclave_cleric(), 2));
+    deck.append(&mut duplicate_card(create_ossification(), 4));
+    deck.append(&mut duplicate_card(create_counterspell(), 4));
+    deck.append(&mut duplicate_card(create_lunarch_veteran(), 2));
     // deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
     // deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
     // deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
@@ -122,18 +123,65 @@ pub fn create_angels_deck() -> Vec<Card> {
     deck
 }
 
+pub fn create_counterspell() -> Card {
+    // Card::new(
+    //     "Counter Spell",
+    //     "Counter target spell.",
+    //     vec![CardActionTrigger::new(
+    //         ActionTriggerType::CardPlayedFromHand(None),
+    //         CardRequiredTarget::Spell,
+    //         Arc::new(CounterSpellAction {}),
+    //     )],
+    //     CardPhase::Ready,
+    //     CardType::Instant,
+    //     vec![],
+    //     vec![ManaType::Blue, ManaType::Blue],
+    // )
+    CardBuilder::new()
+        .name("Counter Spell")
+        .description("Counter target spell")
+        .play_target(CardRequiredTarget::Spell)
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield)
+                .action(CounterSpellAction {}),
+        )
+        .card_type(CardType::Instant)
+        .build()
+}
+
+pub fn create_test_card() -> Card {
+    CardBuilder::new()
+        .name("Hello world")
+        .description("Gain 5 health")
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
+                |game, source_card, player, target, _| {
+                    Box::pin(async move {
+                        Game::add_stat(&game, &source_card, &player, StatType::Health, 5).await;
+                        Ok(())
+                    })
+                },
+            ),
+        )
+        .mana_cost(vec![ManaType::Colorless, ManaType::White])
+        .card_type(CardType::Instant)
+        .build()
+}
+
 pub fn create_ossification() -> Card {
     CardBuilder::new()
         .name("Ossification")
         .description("Enchant basic land you control\nWhen Ossification enters, exile target creature or planeswalker an opponent controls until Ossification leaves the battlefield.")
+        .play_target(CardRequiredTarget::BasicLand(CardTargetTeam::Owner, None))
         .add_action(
             ActionBuilder::new(
                 ActionTriggerType::CardEnteredBattlefield,
-                CardRequiredTarget::BasicLand(CardTargetTeam::Owner, None),
             )
-            .closure_action(|game, source_card, target, _| {
+            .closure_action(|game, source_card, owner, target, _| {
                 Box::pin(async move {
-                    source_card.lock().await.attached = target.and_then(|target| Some(Game::card_from_frontend_target(&game, &target)));
+
+                    let card = Game::card_from_frontend_target(&game, &target.unwrap()).await;
+                    source_card.lock().await.attached = Some(card);
 
                     Game::execute_actions(game.clone(), vec![Arc::new(CardActionWrapper {
                         ability_id: None,
@@ -148,11 +196,11 @@ pub fn create_ossification() -> Card {
                             ),
                             description: "Exile target creature or planeswalker an opponent controls.".to_string(),
                             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                Arc::new(AsyncClosureAction::new(Arc::new(|game, source_card, target, _| {
+                                Arc::new(AsyncClosureAction::new(Arc::new(|game, source_card, owner, target, _| {
                                     Box::pin(async move {
                                         source_card.lock().await.target = target.clone();
                                         if let Some(target) = &target {
-                                            let card = Game::card_from_frontend_target(&game, &target);
+                                            let card = Game::card_from_frontend_target(&game, &target).await;
                                             Game::exile_card(&game, &card).await?;
                                         }
                                         Ok(())
@@ -162,16 +210,21 @@ pub fn create_ossification() -> Card {
                         }),
                         target: None,
                     })]).await?;
+                    println!("hello!");
 
                     Ok(())
                 })
             })
-            .requirements(|game, source, _| {
+        )
+        .mana_cost(vec![ManaType::Colorless, ManaType::White])
+        .card_type(CardType::Enchantment)
+        .phase(CardPhase::Ready)
+            .play_requirements(|game, source, _| {
                 Box::pin(async move {
                     if let Some(owner) = { source.lock().await.owner.clone() } {
                         // Check if an opponent has a creature or planeswalker in play
                         let owner_cloned = owner.clone();
-                        let opponent_has_creature_or_pw = game.try_lock().expect("Unable to lock game")
+                        let opponent_has_creature_or_pw = game.lock().await
                             .filter_cards_in_play(move |card_in_play| {
                                 if let Some(card_owner) = &card_in_play.owner {
                                     !Arc::ptr_eq(&owner_cloned, card_owner) && card_in_play.card_type == CardType::Creature
@@ -192,38 +245,28 @@ pub fn create_ossification() -> Card {
                     }
                 })
             })
-        )
-        .mana_cost(vec![ManaType::Colorless, ManaType::White])
-        .card_type(CardType::Enchantment)
-        .phase(CardPhase::Ready)
         .build()
 }
 
-pub fn create_skyclave_apparition() -> Card {
-    CardBuilder::new()
-        .name("Skyclave Apparition")
-        .description("When Skyclave Apparition enters, exile up to one target nonland, nontoken permanent you don't control with mana value 4 or less.")
-        .creature_of_type(1,3,CreatureType::Angel)
-        .mana_cost(vec![ManaType::Colorless, ManaType::White])
-        .add_action(
-            ActionBuilder::new(
-                ActionTriggerType::CardEnteredBattlefield,
-                CardRequiredTarget::None
-            )
-            .closure_action(
-                |game, source, target, ability_id| {
-                    Box::pin(async move {
-                        let owner = source.lock().await.owner.clone();
-                        if let Some(owner) = owner {
-                            todo!()
-                            // game.lock().await.add_health(&owner, 2).await;
-                        }
-                        Ok(())
-                    })
-                }
-            ))
-        .build()
-}
+// pub fn create_skyclave_apparition() -> Card {
+//     CardBuilder::new()
+//         .name("Skyclave Apparition")
+//         .description("When Skyclave Apparition enters, exile up to one target nonland, nontoken permanent you don't control with mana value 4 or less.")
+//         .creature_of_type(1,3, CreatureType::Angel)
+//         .mana_cost(vec![ManaType::Colorless, ManaType::White])
+//         .add_action(
+//             ActionBuilder::new(
+//                 ActionTriggerType::CardEnteredBattlefield,
+//             )
+//             .closure_action(
+//                 |game, source, owner, target, ability_id| {
+//                     Box::pin(async move {
+//                         Ok(())
+//                     })
+//                 }
+//             ))
+//         .build()
+// }
 
 pub fn create_skyclave_cleric() -> Card {
     CardBuilder::new()
@@ -232,18 +275,10 @@ pub fn create_skyclave_cleric() -> Card {
         .creature_of_type(1, 3, CreatureType::Angel)
         .mana_cost(vec![ManaType::Colorless, ManaType::White])
         .add_action(
-            ActionBuilder::new(
-                ActionTriggerType::CardEnteredBattlefield,
-                CardRequiredTarget::None,
-            )
-            .closure_action(
-                |game: Arc<Mutex<Game>>, source: Arc<Mutex<Card>>, _, _| {
+            ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
+                |game, source, owner, _, _| {
                     Box::pin(async move {
-                        println!("{:?}", source);
-                        let owner = source.lock().await.owner.clone();
-                        if let Some(owner) = owner {
-                            Game::add_health(&game, &source, &owner, 2).await;
-                        }
+                        Game::add_stat(&game, &source, &owner, StatType::Health, 2).await;
 
                         Ok(())
                     })
@@ -537,28 +572,17 @@ fn create_lunarch_veteran() -> Card {
         .description("Whenever another creature you control enters, you gain 1 life.")
         .mana_cost(vec![ManaType::White])
         .add_action(
-            ActionBuilder::new(
-                ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner),
-                CardRequiredTarget::None,
-            )
-            .closure_action(|game, source, target, ability_id| {
-                Box::pin(async move {
-                    let target = Game::frontend_target_from_card(&game, &source)
-                        .await
-                        .expect("hm");
-                    let (owner, card_type) = {
-                        let card = source.lock().await;
-                        let owner = card.owner.clone().unwrap();
-                        let card_type = card.card_type.clone();
-                        (owner, card_type)
-                    };
+            ActionBuilder::new(ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner))
+                .closure_action(|game, source, owner, target, ability_id| {
+                    Box::pin(async move {
+                        let card_type = source.lock().await.card_type.clone();
 
-                    if card_type == CardType::Creature {
-                        Game::add_health(&game, &source, &owner, 1).await;
-                    }
-                    Ok(())
-                })
-            }),
+                        if card_type == CardType::Creature {
+                            Game::add_stat(&game, &source, &owner, StatType::Health, 1).await;
+                        }
+                        Ok(())
+                    })
+                }),
         )
         .build()
 }

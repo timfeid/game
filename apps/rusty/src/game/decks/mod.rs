@@ -3,6 +3,7 @@
 // pub mod green;
 // pub mod green_a;
 // pub mod red;
+pub mod vegas;
 pub mod white;
 
 use rand::seq::SliceRandom;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use ulid::Ulid;
+use vegas::create_vegas_deck;
 use white::{create_angels_blue_deck, create_angels_deck};
 
 use crate::game::action::generate_mana::GenerateManaAction;
@@ -66,9 +68,10 @@ impl Deck {
             // DeckSelector::Elves2 => create_green_deck_v2(),
             // DeckSelector::Blue => create_blue_deck(),
             // DeckSelector::Black => create_black_deck(),
-            DeckSelector::Angels => create_angels_deck(),
+            // DeckSelector::Angels => create_angels_deck(),
             // DeckSelector::Red => create_red_deck(),
             // DeckSelector::AngelsBlue => create_angels_blue_deck(),
+            DeckSelector::Vegas => create_vegas_deck(),
         }
     }
     pub fn new_from_selection(selection: &DeckSelector) -> Self {

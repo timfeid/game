@@ -14,7 +14,10 @@ use axum::response::sse::KeepAlive;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use textwrap::fill;
-use tokio::{sync::Mutex, time::sleep};
+use tokio::{
+    sync::Mutex,
+    time::{sleep, timeout},
+};
 use ulid::Ulid;
 
 use crate::{
@@ -97,9 +100,9 @@ impl Player {
         self.spells = vec![];
     }
 
-    pub async fn add_health(&mut self, amount: i16) {
+    pub async fn add_stat_type(&mut self, stat_type: StatType, amount: i16) {
         self.stat_manager
-            .add_stat(Ulid::new().to_string(), Stat::new(StatType::Health, amount));
+            .add_stat(Ulid::new().to_string(), Stat::new(stat_type, amount));
     }
 
     pub fn new(name: &str, health: i16, deck: Vec<Card>) -> Self {
@@ -514,17 +517,16 @@ impl Player {
     pub async fn creatures_of_type(&self, creature_type: CreatureType) -> Vec<Arc<Mutex<Card>>> {
         let mut cards: Vec<Arc<Mutex<Card>>> = vec![];
         for card_arc in &self.cards_in_play {
-            if let Ok(card) = card_arc.try_lock() {
-                if card.creature_type == Some(creature_type) {
-                    cards.push(Arc::clone(card_arc));
-                }
+            let card = card_arc.lock().await;
+            if card.creature_type == Some(creature_type) {
+                cards.push(Arc::clone(card_arc));
             }
         }
 
         cards
     }
 
-    pub fn can_pay_mana(&self, mana: &Vec<ManaType>) -> bool {
+    pub async fn can_pay_mana(&self, mana: &Vec<ManaType>) -> bool {
         let mut required_mana = ManaPool::new();
 
         for mana_type in mana {
@@ -533,19 +535,27 @@ impl Player {
 
         let mut available_lands = vec![];
         {
-            for card in &self.cards_in_play {
-                if let Ok(card) = card.try_lock() {
-                    if !card.tapped {
-                        for trigger in &card.triggers {
-                            if let Some(generate_mana_action) =
-                                trigger.action.as_any().downcast_ref::<GenerateManaAction>()
-                            {
-                                available_lands.push((
-                                    card.card_type.clone(),
-                                    generate_mana_action.mana_to_add.clone(),
-                                ));
+            for card_arc in &self.cards_in_play {
+                // Attempt to acquire the lock with a 50ms timeout
+                match timeout(Duration::from_millis(50), card_arc.lock()).await {
+                    Ok(card_guard) => {
+                        let card = card_guard; // Successfully acquired the lock
+                        if !card.tapped {
+                            for trigger in &card.triggers {
+                                if let Some(generate_mana_action) =
+                                    trigger.action.as_any().downcast_ref::<GenerateManaAction>()
+                                {
+                                    available_lands.push((
+                                        card.card_type.clone(),
+                                        generate_mana_action.mana_to_add.clone(),
+                                    ));
+                                }
                             }
                         }
+                    }
+                    Err(_) => {
+                        // Timeout occurred, skip this card and continue to the next one
+                        continue;
                     }
                 }
             }
@@ -567,104 +577,6 @@ impl Player {
         }
 
         true
-    }
-
-    pub async fn play_card(
-        player_arc: &Arc<Mutex<Player>>,
-        card: &Arc<Mutex<Card>>,
-        current_turn: Turn,
-    ) -> Result<(), String> {
-        // Lock the player to mutate state
-
-        let can_pay_to_cast = player_arc.lock().await.pool_has_cost_for_card(&card).await;
-        let can_play = player_arc
-            .lock()
-            .await
-            .can_play(&card, Arc::ptr_eq(&current_turn.current_player, player_arc))
-            .await;
-        let name = player_arc.lock().await.name.clone();
-
-        if !can_play {
-            return Err(format!(
-                "You cannot cast {} right now for {}",
-                card.lock().await.name,
-                name
-            ));
-        }
-
-        if !can_pay_to_cast {
-            return Err(format!(
-                "Not enough mana to cast card {} for {}",
-                card.lock().await.name,
-                name
-            ));
-        }
-        // Pay mana
-        player_arc.lock().await.pay_mana_for_card(&card).await?;
-
-        player_arc.lock().await.spells.push(card.clone());
-        println!("Added to spells list");
-        Ok(())
-    }
-
-    pub async fn play_card_in_hand(
-        player_arc: &Arc<Mutex<Player>>,
-        index: usize,
-        current_turn: Turn,
-    ) -> Result<Arc<Mutex<Card>>, String> {
-        // Lock the player to mutate state
-        let card_arc = {
-            let card = player_arc
-                .lock()
-                .await
-                .cards_in_hand
-                .get(index)
-                .ok_or("Invalid card index")?
-                .clone();
-
-            let can_pay_to_cast = player_arc.lock().await.pool_has_cost_for_card(&card).await;
-            let can_play = player_arc
-                .lock()
-                .await
-                .can_play(&card, Arc::ptr_eq(&current_turn.current_player, player_arc))
-                .await;
-            let name = player_arc.lock().await.name.clone();
-
-            if !can_play {
-                return Err(format!(
-                    "You cannot cast {} right now for {}",
-                    card.lock().await.name,
-                    name
-                ));
-            }
-
-            if !can_pay_to_cast {
-                return Err(format!(
-                    "Not enough mana to cast card {} for {}",
-                    card.lock().await.name,
-                    name
-                ));
-            }
-            // Pay mana
-            player_arc.lock().await.pay_mana_for_card(&card).await?;
-
-            // Remove the card from hand
-            player_arc.lock().await.cards_in_hand.remove(index);
-
-            player_arc.lock().await.spells.push(card.clone());
-            println!("Added to spells list");
-
-            card
-        }; // Lock is released here
-
-        // Create the action
-        // let action = Arc::new(PlayCardAction::new(
-        //     player_arc.clone(),
-        //     card_arc.clone(),
-        //     target,
-        // ));
-
-        Ok(card_arc)
     }
 
     pub fn draw_card(&mut self) -> Option<Arc<Mutex<Card>>> {

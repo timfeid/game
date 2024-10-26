@@ -16,7 +16,7 @@
 		selectFromCards
 	} from '../../../stores/dialog';
 	import Ability from '../card/ability.svelte';
-	import CCard from '../Card.svelte';
+	import CCard from '../card/playing-card.svelte';
 	import { toast } from 'svelte-sonner';
 	import { client } from '../../../client';
 	import * as Dialog from '../../ui/dialog';

@@ -23,11 +23,14 @@ pub struct GenerateManaAction {
 }
 
 fn untap_and_remove() -> CardActionTrigger {
-    ActionBuilder::new(
-        ActionTriggerType::AbilityWithinPhases("Undo tap".to_string(), vec![], None, false),
+    ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+        "Undo tap".to_string(),
+        vec![],
+        None,
+        false,
         CardRequiredTarget::None,
-    )
-    .closure_action(|game, card, target, ability| {
+    ))
+    .closure_action(|game, card, owner, target, ability| {
         Box::pin({
             async move {
                 let mana: Vec<GenerateManaAction> = card
@@ -54,14 +57,7 @@ fn untap_and_remove() -> CardActionTrigger {
                 if mana.len() == 1 {
                     let mana = &mana[0].mana_to_add;
 
-                    card.lock()
-                        .await
-                        .owner
-                        .as_ref()
-                        .unwrap()
-                        .lock()
-                        .await
-                        .pay_mana(mana)?;
+                    owner.lock().await.pay_mana(mana)?;
                     card.lock().await.untap();
                 }
                 Ok(())
@@ -80,12 +76,12 @@ impl CardAction for GenerateManaAction {
         &self,
         game: Arc<Mutex<Game>>,
         card: Arc<Mutex<Card>>,
+        player: Arc<Mutex<Player>>,
         target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        let owner = card.lock().await.owner.clone().unwrap();
         if let Some(FrontendTarget::Card(card)) = &target {
-            let card = Game::card_from_frontend_card_target(&game, card);
+            let card = Game::card_from_frontend_card_target(&game, card).await;
             let trigger = Arc::new(Mutex::new(AddTriggerEffect::new(
                 card.clone(),
                 ExpireContract::Steps(1),
@@ -103,9 +99,8 @@ impl CardAction for GenerateManaAction {
                 trigger,
             );
         }
-        let player = &mut owner.lock().await;
         for mana in &self.mana_to_add {
-            player.mana_pool.add_mana(*mana);
+            player.lock().await.mana_pool.add_mana(*mana);
         }
         Ok(())
     }

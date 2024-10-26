@@ -4,7 +4,7 @@
 	import { client } from '../../client';
 	import { user } from '../../stores/access-token';
 	import Button from '../ui/button/button.svelte';
-	import CCard from './Card.svelte';
+	import CCard from './card/playing-card.svelte';
 	import CastMandatoryAbility from './dialog/cast-mandatory-ability.svelte';
 	import AskOptionalAbility from './dialog/cast-optional-ability.svelte';
 	import SelectAbility from './dialog/select-ability.svelte';
@@ -37,7 +37,7 @@
 
 <AttackerLines game={game_state} />
 
-<div class="min-h-[calc(100vh-3rem)] flex flex-col w-full">
+<div class="min-h-[calc(100vh)] flex flex-col w-full">
 	<div
 		class=" z-50 sticky top-0 bg-gradient-to-r from-red-500 from-10% to via-purple-700 via-50% to-indigo-500 to-90% flex shadow-xl"
 	>

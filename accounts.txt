@@ -1,0 +1,265 @@
+{
+    "Accounts": [
+        {
+            "Id": "234975208835",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/234975208835",
+            "Email": "tim.feid+scribe-dev@tellimer.com",
+            "Name": "osprey-dev-account-tim",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-22T03:45:38.576000-04:00"
+        },
+        {
+            "Id": "219482914833",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/219482914833",
+            "Email": "dev+scriber-testing@tellimer.com",
+            "Name": "scriber-testing",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-01-05T05:49:12.950000-05:00"
+        },
+        {
+            "Id": "517137106023",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/517137106023",
+            "Email": "masterpayer-1310517@accounts.manage.rackspace.com",
+            "Name": "masterpayer-1310517",
+            "Status": "ACTIVE",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": "2018-04-13T07:22:02.819000-04:00"
+        },
+        {
+            "Id": "307199920007",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/307199920007",
+            "Email": "dev+shoebill-dev-decebal-account@tellimer.com",
+            "Name": "shoebillDevDecebalAccount",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-10-26T12:55:44.323000-04:00"
+        },
+        {
+            "Id": "967378506775",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/967378506775",
+            "Email": "dev+reap-external-account-simulation@tellimer.com",
+            "Name": "reap-external-account-simulation",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-09-06T09:15:00.064000-04:00"
+        },
+        {
+            "Id": "086515518901",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/086515518901",
+            "Email": "dev+scriber-production@tellimer.com",
+            "Name": "scriber-production",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-11-01T16:32:52.976000-04:00"
+        },
+        {
+            "Id": "487400616918",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/487400616918",
+            "Email": "dev+shoebill-dev-account@tellimer.com",
+            "Name": "shoebillDevAccount",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-10-18T11:59:44.809000-04:00"
+        },
+        {
+            "Id": "082372256078",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/082372256078",
+            "Email": "dev+shoebill-prod-account@tellimer.com",
+            "Name": "shoebillProdAccount",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-10-26T12:55:58.642000-04:00"
+        },
+        {
+            "Id": "406312326008",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/406312326008",
+            "Email": "rackspace-bishtdr-03-1310517@accounts.manage.rackspace.com",
+            "Name": "rackspace-bishtdr-03-1310517",
+            "Status": "ACTIVE",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": "2024-06-06T16:10:07.832000-04:00"
+        },
+        {
+            "Id": "030559780325",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/030559780325",
+            "Email": "selcuk.cihan@toptal.com",
+            "Name": "osprey-dev-account-scihan",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-21T09:38:42.601000-04:00"
+        },
+        {
+            "Id": "029181898616",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/029181898616",
+            "Email": "daniel.vliegenthart.aws.1@tellimer.com",
+            "Name": "forge-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2019-07-26T08:32:36.566000-04:00"
+        },
+        {
+            "Id": "094259195599",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/094259195599",
+            "Email": "marwan.hamdan@toptal.com",
+            "Name": "osprey-dev-account-marwan",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-20T08:57:30.720000-04:00"
+        },
+        {
+            "Id": "074174062195",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/074174062195",
+            "Email": "dev@tellimer.com",
+            "Name": "osprey-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-08-16T08:33:57.095000-04:00"
+        },
+        {
+            "Id": "157286730026",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/157286730026",
+            "Email": "dev+scriber-fe-account@tellimer.com",
+            "Name": "scriber-dev-account-frontend",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-26T06:29:10.229000-04:00"
+        },
+        {
+            "Id": "533267150818",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/533267150818",
+            "Email": "ian.watt@tellimer.com",
+            "Name": "TensorTrove",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2024-01-24T04:57:17.822000-05:00"
+        },
+        {
+            "Id": "452159547159",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/452159547159",
+            "Email": "dev+taylor@tellimer.com",
+            "Name": "scriber-dev-account-taylor",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-11-05T05:28:09.155000-04:00"
+        },
+        {
+            "Id": "741027665889",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/741027665889",
+            "Email": "decebal.dobrica+scribe-dev@tellimer.com",
+            "Name": "osprey-dev-account-decebal",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-21T11:45:47.877000-04:00"
+        },
+        {
+            "Id": "805385442891",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/805385442891",
+            "Email": "daniel.vliegenthart.aws.2@tellimer.com",
+            "Name": "sift-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2019-08-05T12:54:49.259000-04:00"
+        },
+        {
+            "Id": "443187700735",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/443187700735",
+            "Email": "dev+webiny-parsel-prod@tellimer.com",
+            "Name": "webiny-parsel-prod",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-09-08T07:54:36.879000-04:00"
+        },
+        {
+            "Id": "847930789892",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/847930789892",
+            "Email": "othman.alkhamra+scribe-dev@tellimer.com",
+            "Name": "osprey-dev-account-othman",
+            "Status": "SUSPENDED",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-22T03:40:58.544000-04:00"
+        },
+        {
+            "Id": "629131816332",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/629131816332",
+            "Email": "dev+santiago@tellimer.com",
+            "Name": "scriber-dev-account-santiago",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-04-19T07:55:59.150000-04:00"
+        },
+        {
+            "Id": "801416057817",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/801416057817",
+            "Email": "dev+shoebill-dev-tim-account@tellimer.com",
+            "Name": "shoebillDevTimAccount",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-10-26T12:55:45.350000-04:00"
+        },
+        {
+            "Id": "426767107578",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/426767107578",
+            "Email": "dev+scriber-staging@tellimer.com",
+            "Name": "scriber-staging",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2021-10-28T12:28:14.430000-04:00"
+        },
+        {
+            "Id": "801498174265",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/801498174265",
+            "Email": "decebal.dobrica.aws.lede.dev@tellimer.com",
+            "Name": "lede-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2020-01-07T07:44:35.374000-05:00"
+        },
+        {
+            "Id": "371433152828",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/371433152828",
+            "Email": "rackspace-bishtdr-02-1310517@accounts.manage.rackspace.com",
+            "Name": "rackspace-bishtdr-02-1310517",
+            "Status": "ACTIVE",
+            "JoinedMethod": "INVITED",
+            "JoinedTimestamp": "2022-04-05T16:33:35.894000-04:00"
+        },
+        {
+            "Id": "247284535810",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/247284535810",
+            "Email": "decebal.dobrica.aws.brane.dev@tellimer.com",
+            "Name": "cuckoo-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2020-02-06T06:24:03.852000-05:00"
+        },
+        {
+            "Id": "188049909735",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/188049909735",
+            "Email": "daniel.vliegenthart.aws.idris.dev@tellimer.com",
+            "Name": "idris-dev",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2019-07-16T10:19:18.347000-04:00"
+        },
+        {
+            "Id": "006333838650",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/006333838650",
+            "Email": "dev+shoebill-dev-selcuk-account@tellimer.com",
+            "Name": "shoebillDevSelcukAccount",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-10-26T12:56:45.175000-04:00"
+        },
+        {
+            "Id": "455993805146",
+            "Arn": "arn:aws:organizations::517137106023:account/o-qicheyd26v/455993805146",
+            "Email": "dev+shoebill-testing-account@tellimer.com",
+            "Name": "shoebillTestingAccount",
+            "Status": "ACTIVE",
+            "JoinedMethod": "CREATED",
+            "JoinedTimestamp": "2022-11-09T07:21:37.178000-05:00"
+        }
+    ]
+}

@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 use crate::game::{
     card::Card,
     effects::EffectTarget,
+    player::Player,
     stat::{Stat, StatType, Stats},
     FrontendTarget, Game,
 };
@@ -26,6 +27,7 @@ impl CardAction for CardAddStatAction {
         &self,
         game: Arc<Mutex<Game>>,
         card: Arc<Mutex<Card>>,
+        player: Arc<Mutex<Player>>,
         target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
