@@ -667,27 +667,30 @@ impl Card {
         let id = Ulid::new().to_string();
         match counter {
             Counter::PowerToughnessModifier(power, toughness) => {
-                let mut game = game.lock().await;
-                game.effect_manager.add_effect(
-                    EffectID(format!("counter-{}-toughness", id)),
-                    Arc::new(Mutex::new(StatModifierEffect::new(
+                Game::apply_effect(
+                    &game,
+                    StatModifierEffect::new(
+                        format!("counter-{}-power", id),
+                        EffectTarget::Card(card.clone()),
+                        StatType::Power,
+                        2,
+                        ExpireContract::Turns(1),
+                        None,
+                    ),
+                )
+                .await;
+                Game::apply_effect(
+                    &game,
+                    StatModifierEffect::new(
+                        format!("counter-{}-toughness", id),
                         EffectTarget::Card(card.clone()),
                         StatType::Toughness,
-                        toughness.clone(),
-                        ExpireContract::Never,
+                        2,
+                        ExpireContract::Turns(1),
                         None,
-                    ))),
-                );
-                game.effect_manager.add_effect(
-                    EffectID(format!("counter-{}-power", id)),
-                    Arc::new(Mutex::new(StatModifierEffect::new(
-                        EffectTarget::Card(card),
-                        StatType::Power,
-                        power.clone(),
-                        ExpireContract::Never,
-                        None,
-                    ))),
-                );
+                    ),
+                )
+                .await;
                 println!("applied power toughness counter!");
             }
             Counter::Incremental(total) => {

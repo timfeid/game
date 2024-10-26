@@ -370,6 +370,7 @@ pub struct StatModifierEffect {
 
 impl StatModifierEffect {
     pub fn new(
+        id: String,
         target: EffectTarget,
         stat_type: StatType,
         amount: i16,
@@ -382,7 +383,7 @@ impl StatModifierEffect {
             source_card,
             amount,
             expires,
-            id: EffectID::new(),
+            id: EffectID(id),
             applied: false,
             previous_turn: None,
         }

@@ -19,12 +19,13 @@ use action::{
 };
 use card::{Card, CardPhase, CardType};
 use combat::Combat;
-use effects::{EffectID, EffectManager, EffectTarget};
+use effects::{Effect, EffectID, EffectManager, EffectTarget};
 use mana::{ManaPool, ManaType};
 use player::Player;
 use rand::seq::index;
 use redis::Pipeline;
 use serde::{Deserialize, Serialize};
+use slot_machine::SlotMachine;
 use specta::Type;
 use stat::{CardStatChangeListener, StatManager, StatType, Stats};
 use tokio::{
@@ -49,6 +50,7 @@ pub mod decks;
 pub mod effects;
 pub mod mana;
 pub mod player;
+pub mod slot_machine;
 pub mod stat;
 pub mod turn;
 
@@ -1687,7 +1689,6 @@ impl Game {
     pub async fn collect_actions_for_phase(&mut self) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions = Vec::new();
 
-        println!("hi");
         for (player_index, player_arc) in self.players.iter().enumerate() {
             let (triggers, cards_in_play) = {
                 let player = player_arc.lock().await;
@@ -1706,7 +1707,6 @@ impl Game {
                 }
             }
 
-            println!("hi2");
             // Collect actions for each card the player has in play
             for card_arc in &cards_in_play {
                 let turn = self.current_turn.clone().unwrap();
@@ -1715,10 +1715,8 @@ impl Game {
                     if let ActionTriggerType::PhaseStarted(trigger_phase, phase_target) =
                         &action_trigger.trigger_type
                     {
-                        println!("hi3");
                         let is_owner = Arc::ptr_eq(&turn.current_player, &player_arc);
                         let target = card_arc.lock().await.target.clone();
-                        println!("hi4");
                         if trigger_phase.contains(&turn.phase)
                             && match phase_target {
                                 PhaseTarget::Owner => is_owner,
@@ -2060,6 +2058,26 @@ impl Game {
         ActionType::None
     }
 
+    pub async fn apply_effect<E>(game: &Arc<Mutex<Game>>, effect: E)
+    where
+        E: 'static + Effect + Send + Sync,
+    {
+        game.lock()
+            .await
+            .effect_manager
+            .add_effect(effect.get_final_id(), Arc::new(Mutex::new(effect)));
+        let turn = game.lock().await.current_turn.clone();
+        if let Some(current_turn) = turn {
+            game.lock()
+                .await
+                .effect_manager
+                .apply_effects(current_turn)
+                .await;
+        }
+
+        game.lock().await.refresh_clients();
+    }
+
     pub async fn priority_loop(game_arc: Arc<Mutex<Game>>, first_player: &Arc<Mutex<Player>>) {
         let mut players_in_order = {
             let mut game = game_arc.lock().await;
@@ -2083,7 +2101,7 @@ impl Game {
                     player.priority_turn_start().await;
                     println!("Player {}'s priority turn has started.", player.name);
                 }
-                let time_limit = if i == 0 { 7 } else { 3 };
+                let time_limit = if i == 0 { 0 } else { 3 };
 
                 game.lock().await.current_priority_player =
                     Some((player_arc.clone(), time_limit.clone(), ActionType::None));
@@ -2296,6 +2314,25 @@ impl Game {
         }
         game.lock().await.start_turn(0).await;
         Game::advance_turn(game).await;
+    }
+
+    pub async fn slot_machine_minigame(
+        game: &Arc<Mutex<Game>>,
+        player: &Arc<Mutex<Player>>,
+        percent_chance_of_winning: i8,
+        winning_message: &str,
+        losing_message: &str,
+    ) -> bool {
+        let slot_machine = SlotMachine::new(percent_chance_of_winning);
+        let result = slot_machine.spin(winning_message, losing_message);
+
+        let sender = game.lock().await.broadcast_sender.clone();
+        let winner = result.won.clone();
+        if let Some(ref sender) = sender {
+            let _ = sender.send(Some(LobbyCommand::ShowSlotMachine(result)));
+        }
+
+        return winner;
     }
 
     async fn add_stat(

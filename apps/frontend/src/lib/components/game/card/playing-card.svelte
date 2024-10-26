@@ -110,15 +110,46 @@
 		return typeof cardType !== 'string' && 'AdvancedLand' in cardType;
 	}
 
+	function isMultiLand(
+		cardType: CardType
+	): cardType is { AdvancedMultiLand: [ManaType, ManaType] } {
+		return typeof cardType !== 'string' && 'AdvancedMultiLand' in cardType;
+	}
+
 	function isBasicLand(cardType: CardType): cardType is { BasicLand: ManaType } {
 		return typeof cardType !== 'string' && 'BasicLand' in cardType;
 	}
 
-	$: manaType = isBasicLand(card.card_type)
-		? card.card_type.BasicLand
-		: isAdvancedLand(card.card_type)
-			? card.card_type.AdvancedLand
-			: null;
+	// $: manaType = isBasicLand(card.card_type)
+	// 	? card.card_type.BasicLand
+	// 	: isAdvancedLand(card.card_type)
+	// 		? card.card_type.AdvancedLand
+	// 		: null;
+
+	const manaColors = {
+		Red: '#f44336',
+		Green: '#4caf50',
+		Blue: '#2196f3',
+		Black: '#000000',
+		White: '#ffffff',
+		Colorless: '#dddddd'
+	};
+
+	let manaTypeOne: ManaType | null = null;
+	let manaTypeTwo: ManaType | null = null;
+	$: {
+		if (card) {
+			if (isMultiLand(card.card_type)) {
+				[manaTypeOne, manaTypeTwo] = card.card_type.AdvancedMultiLand;
+			} else if (isAdvancedLand(card.card_type)) {
+				manaTypeOne = card.card_type.AdvancedLand;
+				manaTypeTwo = card.card_type.AdvancedLand;
+			} else if (isBasicLand(card.card_type)) {
+				manaTypeOne = card.card_type.BasicLand;
+				manaTypeTwo = card.card_type.BasicLand;
+			}
+		}
+	}
 
 	async function actionCard() {
 		console.log(cardWithDetails.abilities);
@@ -211,19 +242,13 @@
 	></div>
 	<div
 		class="card-main relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
+		style="--mana-color: {manaTypeOne
+			? manaColors[manaTypeOne]
+			: 'transparent'}; --mana-color-2: {manaTypeTwo ? manaColors[manaTypeTwo] : 'transparent'}"
 	>
 		<div
-			class="card-header flex items-center justify-between w-full py-0.5 px-2 w-full"
-			class:bg-green-200={manaType === 'Green'}
-			class:bg-blue-200={manaType === 'Blue'}
-			class:bg-black={manaType === 'Black'}
-			class:bg-white={manaType === 'White'}
-			class:text-white={manaType === 'Black'}
-			class:text-black={manaType === 'White'}
-			class:dark:bg-green-800={manaType === 'Green'}
-			class:dark:bg-blue-800={manaType === 'Blue'}
-			class:dark:bg-black={manaType === 'Black'}
-			class:dark:bg-white={manaType === 'White'}
+			class="card-header flex items-center justify-between w-full py-0.5 px-2 bg-gradient-to-br from-[var(--mana-color)]
+		to-[var(--mana-color-2)]"
 		>
 			<h2 class="text-xs leading-6 font-bold truncate">
 				{card.name}
@@ -240,6 +265,8 @@
 					{card.card_type}
 				{:else if isBasicLand(card.card_type)}
 					Basic Land
+				{:else if isMultiLand(card.card_type)}
+					Land
 				{:else if isAdvancedLand(card.card_type)}
 					Land
 				{/if}

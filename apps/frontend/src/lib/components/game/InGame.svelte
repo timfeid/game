@@ -12,6 +12,7 @@
 	import Player from './Player.svelte';
 	import PriorityQueueNotification from './priority-queue-notification.svelte';
 	import AttackerLines from './attacker-lines.svelte';
+	import MiniGame from './dialog/mini-game.svelte';
 
 	export let game_state: GameState;
 	export let turnMessage: LobbyTurnMessage | undefined;
@@ -88,3 +89,4 @@
 <CastMandatoryAbility code={join_code} game={game_state} />
 <SelectAbility code={join_code} game={game_state} />
 <SelectCard code={join_code} game={game_state} />
+<MiniGame code={join_code} game={game_state} />

@@ -9,14 +9,20 @@
 		ExecuteAbility,
 		LobbyCommand,
 		LobbyData,
-		LobbyTurnMessage
+		LobbyTurnMessage,
+		SlotMachineResult
 	} from '@gangsta/rusty';
 	import { Loader } from 'lucide-svelte';
 	import { type ComponentType } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import InGame from './InGame.svelte';
 	import Lobby from './Lobby.svelte';
-	import { askOptionalAbility, mandatoryAbility, selectFromCards } from '../../stores/dialog';
+	import {
+		askOptionalAbility,
+		mandatoryAbility,
+		selectFromCards,
+		showSlotMachine
+	} from '../../stores/dialog';
 
 	export let code: string;
 
@@ -52,6 +58,10 @@
 		return 'Updated' in data;
 	}
 
+	function isSlotMachine(data: LobbyCommand): data is { ShowSlotMachine: SlotMachineResult } {
+		return 'ShowSlotMachine' in data;
+	}
+
 	function askMandatoryAbility(updatedMessage: ExecuteAbility) {
 		console.log('MAND');
 		mandatoryAbility.set(updatedMessage);
@@ -74,12 +84,19 @@
 		selectFromCards.set(details);
 	}
 
+	function slotMachine(details: SlotMachineResult) {
+		showSlotMachine.set(details);
+	}
+
 	async function reset(code: string, accessToken: string) {
 		if (unsubscribe) {
 			unsubscribe();
 		}
 		unsubscribe = websocketClient.addSubscription(['lobby.subscribe', [code, accessToken]], {
 			onData(data) {
+				if (isSlotMachine(data)) {
+					return slotMachine(data.ShowSlotMachine);
+				}
 				if (isUpdated(data)) {
 					return updated(data.Updated);
 				}
