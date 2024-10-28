@@ -47,6 +47,8 @@ pub struct LobbyTurnMessage {
 pub struct CardSelectionDetails {
     pub player_id: String,
     pub cards: Vec<CardWithDetails>,
+    pub selection_required: bool,
+    pub message: String,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -54,7 +56,6 @@ pub struct AbilityDetails {
     pub mana_cost: Vec<ManaType>,
     pub required_target: CardRequiredTarget,
     pub description: String,
-    pub action_type: ActionType,
     pub show: bool,
     pub id: String,
     pub meets_requirements_except_mana: bool,
@@ -78,7 +79,6 @@ impl ExecuteAbility {
     pub fn new(
         player_id: String,
         card: CardWithDetails,
-        action_type: ActionType,
         mana_cost: Vec<ManaType>,
         required_target: CardRequiredTarget,
         description: String,
@@ -94,7 +94,6 @@ impl ExecuteAbility {
                 mana_cost,
                 required_target,
                 description,
-                action_type,
                 show: true,
                 id,
                 meets_requirements_except_mana,

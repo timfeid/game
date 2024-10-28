@@ -3,9 +3,9 @@ use specta::Type;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Type, Copy)]
 pub enum ManaType {
-    White,     // {W}
+    Purple,    // {P}
     Blue,      // {U}
-    Black,     // {B}
+    Gold,      // {D}
     Red,       // {R}
     Green,     // {G}
     Colorless, // {C}
@@ -14,9 +14,9 @@ pub enum ManaType {
 impl ManaType {
     pub fn format(&self) -> String {
         match self {
-            ManaType::White => "{W}".to_string(),
+            ManaType::Purple => "{P}".to_string(),
             ManaType::Blue => "{U}".to_string(),
-            ManaType::Black => "{B}".to_string(),
+            ManaType::Gold => "{G}".to_string(),
             ManaType::Red => "{R}".to_string(),
             ManaType::Green => "{G}".to_string(),
             ManaType::Colorless => "{C}".to_string(),
@@ -26,9 +26,9 @@ impl ManaType {
 
 #[derive(Type, Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManaPool {
-    pub white: u8,
+    pub purple: u8,
     pub blue: u8,
-    pub black: u8,
+    pub gold: u8,
     pub red: u8,
     pub green: u8,
     pub colorless: u8,
@@ -39,14 +39,14 @@ impl ManaPool {
     pub fn to_vec(&self) -> Vec<ManaType> {
         let mut mana_vec = Vec::new();
 
-        for _ in 0..self.white {
-            mana_vec.push(ManaType::White);
+        for _ in 0..self.purple {
+            mana_vec.push(ManaType::Purple);
         }
         for _ in 0..self.blue {
             mana_vec.push(ManaType::Blue);
         }
-        for _ in 0..self.black {
-            mana_vec.push(ManaType::Black);
+        for _ in 0..self.gold {
+            mana_vec.push(ManaType::Gold);
         }
         for _ in 0..self.red {
             mana_vec.push(ManaType::Red);
@@ -63,9 +63,9 @@ impl ManaPool {
 
     pub fn new() -> Self {
         ManaPool {
-            white: 0,
+            purple: 0,
             blue: 0,
-            black: 0,
+            gold: 0,
             red: 0,
             green: 0,
             colorless: 0,
@@ -75,9 +75,9 @@ impl ManaPool {
 
     pub fn add_mana(&mut self, mana: ManaType) {
         match mana {
-            ManaType::White => self.white += 1,
+            ManaType::Purple => self.purple += 1,
             ManaType::Blue => self.blue += 1,
-            ManaType::Black => self.black += 1,
+            ManaType::Gold => self.gold += 1,
             ManaType::Red => self.red += 1,
             ManaType::Green => self.green += 1,
             ManaType::Colorless => self.colorless += 1,
@@ -85,7 +85,7 @@ impl ManaPool {
     }
 
     pub fn total(&self) -> u8 {
-        self.white + self.blue + self.black + self.red + self.green + self.colorless
+        self.purple + self.blue + self.gold + self.red + self.green + self.colorless
     }
 
     pub fn empty_pool(&mut self) {
@@ -96,14 +96,14 @@ impl ManaPool {
 
     pub fn format_mana(&self) -> String {
         let mut mana_str = String::new();
-        if self.white > 0 {
-            mana_str.push_str(&format!("{{{}}} ", "W".repeat(self.white as usize)));
+        if self.purple > 0 {
+            mana_str.push_str(&format!("{{{}}} ", "W".repeat(self.purple as usize)));
         }
         if self.blue > 0 {
             mana_str.push_str(&format!("{{{}}} ", "U".repeat(self.blue as usize)));
         }
-        if self.black > 0 {
-            mana_str.push_str(&format!("{{{}}} ", "B".repeat(self.black as usize)));
+        if self.gold > 0 {
+            mana_str.push_str(&format!("{{{}}} ", "B".repeat(self.gold as usize)));
         }
         if self.red > 0 {
             mana_str.push_str(&format!("{{{}}} ", "R".repeat(self.red as usize)));

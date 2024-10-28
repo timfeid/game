@@ -20,19 +20,21 @@
 	import { client } from '../../../client';
 	import { RSPCError } from '@rspc/client';
 	import ManaBubbleList from '../mana-bubble/mana-bubble-list.svelte';
+	import type { Snippet } from 'svelte';
 
-	export let cardWithDetails: CardWithDetails;
-	export let game: GameState | undefined = undefined;
-	// export let pile: FrontendPileName;
-	// export let cardWithDetails.frontend_target.card_index: number;
-	// export let playerIndex: number;
-	export let className: string = '';
-	export { className as class };
-	export let noTooltips = false;
+	interface Props {
+		cardWithDetails: CardWithDetails;
+		game?: GameState;
+		class?: string;
+		noTooltips?: boolean;
+		children?: Snippet;
+	}
+
+	let { game, cardWithDetails, class: className, noTooltips, children }: Props = $props();
 
 	let showAttachments = true;
 
-	$: card = cardWithDetails.card;
+	const card = $derived(cardWithDetails.card);
 
 	async function selectAbilityDialog(abilities: AbilityDetails[]): Promise<AbilityDetails> {
 		return await new Promise((resolve, reject) => {
@@ -86,25 +88,27 @@
 		);
 	}
 
-	let damage = 0;
-	let defense = 0;
+	let damage = $state(0);
+	let defense = $state(0);
 	function extractDamageAndDefense(stats: (typeof card)['stats']) {
-		damage = 0;
-		defense = 0;
+		let p = 0;
+		let t = 0;
 		for (let stat of Object.values(stats.stats)) {
 			if (stat.stat_type === 'Power') {
-				damage += stat.intensity;
+				p += stat.intensity;
 			} else if (stat.stat_type === 'Toughness') {
-				defense += stat.intensity;
+				t += stat.intensity;
 			}
 		}
+		damage = p;
+		defense = t;
 	}
 
-	$: {
+	$effect(() => {
 		if (card) {
 			extractDamageAndDefense(card.stats);
 		}
-	}
+	});
 
 	function isAdvancedLand(cardType: CardType): cardType is { AdvancedLand: ManaType } {
 		return typeof cardType !== 'string' && 'AdvancedLand' in cardType;
@@ -135,9 +139,11 @@
 		Colorless: '#dddddd'
 	};
 
-	let manaTypeOne: ManaType | null = null;
-	let manaTypeTwo: ManaType | null = null;
-	$: {
+	let manaTypeOne: ManaType | null = $state(null);
+	let manaTypeTwo: ManaType | null = $state(null);
+	$effect(() => {
+		manaTypeOne = null;
+		manaTypeTwo = null;
 		if (card) {
 			if (isMultiLand(card.card_type)) {
 				[manaTypeOne, manaTypeTwo] = card.card_type.AdvancedMultiLand;
@@ -148,11 +154,8 @@
 				manaTypeOne = card.card_type.BasicLand;
 				manaTypeTwo = card.card_type.BasicLand;
 			}
-		} else {
-			manaTypeOne = null;
-			manaTypeTwo = null;
 		}
-	}
+	});
 
 	async function actionCard() {
 		console.log(cardWithDetails.abilities);
@@ -208,23 +211,23 @@
 		}
 	}
 
-	$: shownAbilities = cardWithDetails.abilities.filter((a) => a.show);
+	const shownAbilities = $derived(cardWithDetails.abilities.filter((a) => a.show));
 </script>
 
 <button
-	on:click={actionCard}
+	onclick={actionCard}
 	class:rotate-90={card.tapped}
 	class:scale-75={card.tapped}
-	class:has-attachments={$$slots.default}
+	class:has-attachments={children}
 	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
 	data-player-id={cardWithDetails.frontend_target.player_id}
 	in:fly={{ y: '-300%', duration: 500 }}
 >
-	{#if $$slots.default}
+	{#if children}
 		<div class="attachment-wrapper" transition:fly={{ y: 100, duration: 300 }}>
-			<slot />
+			{@render children()}
 		</div>
 	{/if}
 	<div

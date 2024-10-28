@@ -24,7 +24,6 @@ pub enum ModifyStatTarget {
 pub enum EffectTarget {
     Player(Arc<Mutex<Player>>),
     Card(Arc<Mutex<Card>>),
-    CardId(String),
 }
 
 // Define a unique identifier for each effect
@@ -344,10 +343,9 @@ impl Effect for ExileCardEffect {
     }
 
     async fn cleanup(&mut self) {
-        if let EffectTarget::CardId(target_id) = &self.target {
+        if let Some(id) = &self.target_id {
             println!("returning card.");
-            todo!()
-            // Game::exiled_card_to_battlefield(&self.game, target_id.clone()).await;
+            Game::exiled_card_to_battlefield(&self.game, id.clone()).await;
         }
     }
 
@@ -410,7 +408,6 @@ impl Effect for StatModifierEffect {
                         .stat_manager
                         .add_stat(id, Stat::new(self.stat_type, self.amount));
                 }
-                EffectTarget::CardId(id) => todo!(),
             }
             self.applied = true;
         }
@@ -450,7 +447,6 @@ impl Effect for StatModifierEffect {
                 let mut player = player_arc.lock().await;
                 player.stat_manager.remove_stat(id_str);
             }
-            EffectTarget::CardId(_) => todo!(),
         }
     }
 
@@ -544,7 +540,6 @@ impl Effect for DynamicStatModifierEffect {
                     let mut player = player_arc.lock().await;
                     player.stat_manager.remove_stat(id_str);
                 }
-                EffectTarget::CardId(_) => todo!(),
             }
         }
     }
@@ -576,7 +571,6 @@ impl Effect for DynamicStatModifierEffect {
                             .add_stat(id, Stat::new(self.stat_type, amount));
                     }
                 }
-                EffectTarget::CardId(_) => todo!(),
             }
             self.applied = true;
         }

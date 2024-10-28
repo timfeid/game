@@ -580,7 +580,6 @@ impl Player {
     }
 
     pub fn draw_card(&mut self) -> Option<Arc<Mutex<Card>>> {
-        println!("{} draws a card.", self.name);
         if let Some(card) = self.deck.draw() {
             self.cards_in_hand.push(card.clone());
             Some(card)
@@ -744,9 +743,9 @@ impl Player {
         }
 
         // Check if the player has enough of each specific colored mana
-        let has_enough_colored_mana = self.mana_pool.white >= required_mana.white
+        let has_enough_colored_mana = self.mana_pool.purple >= required_mana.purple
             && self.mana_pool.blue >= required_mana.blue
-            && self.mana_pool.black >= required_mana.black
+            && self.mana_pool.gold >= required_mana.gold
             && self.mana_pool.red >= required_mana.red
             && self.mana_pool.green >= required_mana.green;
 
@@ -755,9 +754,9 @@ impl Player {
         }
 
         // Calculate the total remaining mana after paying colored costs
-        let remaining_mana = (self.mana_pool.white - required_mana.white)
+        let remaining_mana = (self.mana_pool.purple - required_mana.purple)
             + (self.mana_pool.blue - required_mana.blue)
-            + (self.mana_pool.black - required_mana.black)
+            + (self.mana_pool.gold - required_mana.gold)
             + (self.mana_pool.red - required_mana.red)
             + (self.mana_pool.green - required_mana.green)
             + self.mana_pool.colorless;
@@ -793,9 +792,9 @@ impl Player {
 
     pub fn pay_mana(&mut self, cost: &Vec<ManaType>) -> Result<(), String> {
         // Counts of required mana
-        let mut white_required = 0;
+        let mut purple_required = 0;
         let mut blue_required = 0;
-        let mut black_required = 0;
+        let mut gold_required = 0;
         let mut red_required = 0;
         let mut green_required = 0;
         let mut generic_required = 0;
@@ -803,9 +802,9 @@ impl Player {
         // Count the required mana costs
         for mana in cost {
             match mana {
-                ManaType::White => white_required += 1,
+                ManaType::Purple => purple_required += 1,
                 ManaType::Blue => blue_required += 1,
-                ManaType::Black => black_required += 1,
+                ManaType::Gold => gold_required += 1,
                 ManaType::Red => red_required += 1,
                 ManaType::Green => green_required += 1,
                 ManaType::Colorless => generic_required += 1,
@@ -813,9 +812,9 @@ impl Player {
         }
 
         // Check if the player has enough colored mana
-        if self.mana_pool.white < white_required
+        if self.mana_pool.purple < purple_required
             || self.mana_pool.blue < blue_required
-            || self.mana_pool.black < black_required
+            || self.mana_pool.gold < gold_required
             || self.mana_pool.red < red_required
             || self.mana_pool.green < green_required
         {
@@ -825,16 +824,16 @@ impl Player {
         }
 
         // Deduct the colored mana costs
-        self.mana_pool.white -= white_required;
+        self.mana_pool.purple -= purple_required;
         self.mana_pool.blue -= blue_required;
-        self.mana_pool.black -= black_required;
+        self.mana_pool.gold -= gold_required;
         self.mana_pool.red -= red_required;
         self.mana_pool.green -= green_required;
 
         // Now calculate the total available mana for generic costs
-        let total_available_mana = self.mana_pool.white
+        let total_available_mana = self.mana_pool.purple
             + self.mana_pool.blue
-            + self.mana_pool.black
+            + self.mana_pool.gold
             + self.mana_pool.red
             + self.mana_pool.green
             + self.mana_pool.colorless;
@@ -856,9 +855,9 @@ impl Player {
 
         // Then subtract from colored mana pools
         if remaining_generic > 0 {
-            let white_to_use = std::cmp::min(self.mana_pool.white, remaining_generic);
-            self.mana_pool.white -= white_to_use;
-            remaining_generic -= white_to_use;
+            let purple_to_use = std::cmp::min(self.mana_pool.purple, remaining_generic);
+            self.mana_pool.purple -= purple_to_use;
+            remaining_generic -= purple_to_use;
         }
 
         if remaining_generic > 0 {
@@ -868,9 +867,9 @@ impl Player {
         }
 
         if remaining_generic > 0 {
-            let black_to_use = std::cmp::min(self.mana_pool.black, remaining_generic);
-            self.mana_pool.black -= black_to_use;
-            remaining_generic -= black_to_use;
+            let gold_to_use = std::cmp::min(self.mana_pool.gold, remaining_generic);
+            self.mana_pool.gold -= gold_to_use;
+            remaining_generic -= gold_to_use;
         }
 
         if remaining_generic > 0 {

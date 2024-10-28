@@ -1,5 +1,5 @@
 use super::{
-    action::{Action, CardActionTarget},
+    action::{Action, ActionTriggerType, CardActionTarget, CardActionWrapper},
     card::Card,
     effects::{Effect, EffectTarget},
     player::Player,
@@ -98,7 +98,11 @@ impl Combat {
     pub async fn resolve_combat(
         &mut self,
         attackers: Vec<(Arc<Mutex<Card>>, EffectTarget)>,
-    ) -> Vec<Arc<Mutex<Card>>> {
+    ) -> (
+        Vec<Arc<Mutex<Card>>>,
+        Vec<(Arc<Mutex<Card>>, EffectTarget, i16)>,
+    ) {
+        let mut damages = vec![];
         println!("Resolving combat damage.");
         let mut destroyed_cards = Vec::new();
 
@@ -196,6 +200,11 @@ impl Combat {
             if !is_blocked {
                 self.apply_damage_to_target(attacker_damage, target, attacker_card_arc)
                     .await;
+                damages.push((
+                    attacker_card_arc.clone(),
+                    target.clone(),
+                    attacker_damage.clone(),
+                ));
             } else {
                 // Handle blocked attackers and check for Trample
                 let has_trample = {
@@ -208,6 +217,11 @@ impl Combat {
                     if excess_damage > 0 {
                         self.apply_damage_to_target(excess_damage, target, attacker_card_arc)
                             .await;
+                        damages.push((
+                            attacker_card_arc.clone(),
+                            target.clone(),
+                            excess_damage.clone(),
+                        ));
                     }
                 }
             }
@@ -216,7 +230,7 @@ impl Combat {
         self.attackers.clear();
         self.blockers.clear();
 
-        destroyed_cards
+        (destroyed_cards, damages)
     }
 
     async fn apply_damage_to_target(
@@ -227,22 +241,26 @@ impl Combat {
     ) -> Option<Arc<Mutex<Card>>> {
         match target {
             EffectTarget::Player(player_arc) => {
-                let mut player = player_arc.lock().await;
-                let id = format!(
-                    "damage-{}-{}",
-                    attacker_card_arc.lock().await.name,
-                    // self.attackers.first().unwrap().0.lock().await.name
-                    Ulid::new()
-                );
-                player.add_stat(id, Stat::new(StatType::Health, -damage));
-                {
-                    attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
-                }
+                let id = {
+                    let mut player = player_arc.lock().await;
+                    let id = format!(
+                        "damage-{}-{}",
+                        attacker_card_arc.lock().await.name,
+                        // self.attackers.first().unwrap().0.lock().await.name
+                        Ulid::new()
+                    );
+                    player.add_stat(id, Stat::new(StatType::Health, -damage));
+                    {
+                        attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
+                    }
+                    player.name.clone()
+                };
+
                 println!(
                     "Attacker {} deals {} damage to player {}",
                     attacker_card_arc.lock().await.name,
                     damage,
-                    player.name
+                    player_arc.lock().await.name
                 );
 
                 None

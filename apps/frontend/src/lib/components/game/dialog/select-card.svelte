@@ -63,6 +63,7 @@
 			<Dialog.Overlay />
 			<Dialog.Content noClose class="!w-[90vw] !max-w-[1400px]">
 				<Dialog.Title>Choose a card</Dialog.Title>
+				<Dialog.Description>{cards.message}</Dialog.Description>
 
 				<ul class="border rounded w-full overflow-x-auto flex space-x-2">
 					{#each cards.cards as card, i}
@@ -74,11 +75,13 @@
 					{/each}
 				</ul>
 
-				<div class="flex w-full justify-end">
-					<Dialog.Close>
-						<Button>Cancel</Button>
-					</Dialog.Close>
-				</div>
+				{#if !cards.selection_required}
+					<div class="flex w-full justify-end">
+						<Dialog.Close>
+							<Button>Close</Button>
+						</Dialog.Close>
+					</div>
+				{/if}
 			</Dialog.Content>
 		</Dialog.Portal>
 	</Dialog.Root>

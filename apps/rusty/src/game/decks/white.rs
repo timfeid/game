@@ -31,7 +31,7 @@ fn create_test_plains() -> Card {
     CardBuilder::new()
         .name("Plains")
         .description("")
-        .card_type(CardType::BasicLand(ManaType::White))
+        .card_type(CardType::BasicLand(ManaType::Purple))
         .add_action(
             ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
                 "Adds {W} white mana to your pool.".to_string(),
@@ -42,17 +42,17 @@ fn create_test_plains() -> Card {
             ))
             .action(GenerateManaAction {
                 mana_to_add: vec![
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
-                    ManaType::White,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
+                    ManaType::Purple,
                 ],
                 target: PlayerActionTarget::Owner,
             }),
@@ -149,25 +149,6 @@ pub fn create_counterspell() -> Card {
         .build()
 }
 
-pub fn create_test_card() -> Card {
-    CardBuilder::new()
-        .name("Hello world")
-        .description("Gain 5 health")
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
-                |game, source_card, player, target, _| {
-                    Box::pin(async move {
-                        Game::add_stat(&game, &source_card, &player, StatType::Health, 5).await;
-                        Ok(())
-                    })
-                },
-            ),
-        )
-        .mana_cost(vec![ManaType::Colorless, ManaType::White])
-        .card_type(CardType::Instant)
-        .build()
-}
-
 pub fn create_ossification() -> Card {
     CardBuilder::new()
         .name("Ossification")
@@ -196,7 +177,7 @@ pub fn create_ossification() -> Card {
                             ),
                             description: "Exile target creature or planeswalker an opponent controls.".to_string(),
                             ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                Arc::new(AsyncClosureAction::new(Arc::new(|game, source_card, owner, target, _| {
+                                Arc::new(AsyncClosureAction::new(|game, source_card, owner, target, _| {
                                     Box::pin(async move {
                                         source_card.lock().await.target = target.clone();
                                         if let Some(target) = &target {
@@ -205,7 +186,7 @@ pub fn create_ossification() -> Card {
                                         }
                                         Ok(())
                                     })
-                                })))
+                                }))
                             }),
                         }),
                         target: None,
@@ -216,7 +197,7 @@ pub fn create_ossification() -> Card {
                 })
             })
         )
-        .mana_cost(vec![ManaType::Colorless, ManaType::White])
+        .mana_cost(vec![ManaType::Colorless, ManaType::Purple])
         .card_type(CardType::Enchantment)
         .phase(CardPhase::Ready)
             .play_requirements(|game, source, _| {
@@ -253,7 +234,7 @@ pub fn create_ossification() -> Card {
 //         .name("Skyclave Apparition")
 //         .description("When Skyclave Apparition enters, exile up to one target nonland, nontoken permanent you don't control with mana value 4 or less.")
 //         .creature_of_type(1,3, CreatureType::Angel)
-//         .mana_cost(vec![ManaType::Colorless, ManaType::White])
+//         .mana_cost(vec![ManaType::Colorless, ManaType::Purple])
 //         .add_action(
 //             ActionBuilder::new(
 //                 ActionTriggerType::CardEnteredBattlefield,
@@ -273,7 +254,7 @@ pub fn create_skyclave_cleric() -> Card {
         .name("Skyclave Cleric")
         .description("When Skyclave Cleric enters, you gain 2 life.")
         .creature_of_type(1, 3, CreatureType::Angel)
-        .mana_cost(vec![ManaType::Colorless, ManaType::White])
+        .mana_cost(vec![ManaType::Colorless, ManaType::Purple])
         .add_action(
             ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
                 |game, source, owner, _, _| {
@@ -295,7 +276,7 @@ pub fn create_skyclave_cleric() -> Card {
 //         "When Skyclave Cleric enters, you gain 2 life.",
 //         1,
 //         3,
-//         [ManaType::Colorless, ManaType::White],
+//         [ManaType::Colorless, ManaType::Purple],
 //         [],
 //         CardActionTrigger::new(
 //             ActionTriggerType::CardPlayedFromHand(Some((
@@ -327,7 +308,7 @@ pub fn create_skyclave_cleric() -> Card {
 // //         "As long as you have 30 or more life, Serra Ascendant gets +5/+5 and has flying.",
 // //         1,
 // //         1,
-// //         [ManaType::White],
+// //         [ManaType::Purple],
 // //         [],
 // //         CardActionTrigger::new(
 // //             ActionTriggerType::Continuous,
@@ -424,7 +405,7 @@ pub fn create_skyclave_cleric() -> Card {
 //         "Whenever another Angel you control enters, put a +1/+1 counter on Youthful Valkyrie.",
 //         1,
 //         3,
-//         [ManaType::Colorless, ManaType::White],
+//         [ManaType::Colorless, ManaType::Purple],
 //         [StatType::Flying],
 //         CardActionTrigger::new(
 //             ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner),
@@ -458,7 +439,7 @@ pub fn create_skyclave_cleric() -> Card {
 //         "You have hexproof.\nWhenever Metropolis Reformer is dealt damage, you gain that much life.",
 //         2,
 //         3,
-//         [ManaType::Colorless, ManaType::Colorless, ManaType::White],
+//         [ManaType::Colorless, ManaType::Colorless, ManaType::Purple],
 //         [StatType::Flying, StatType::Vigilance],
 //         CardActionTrigger::new(
 //             ActionTriggerType::DamageApplied,
@@ -490,7 +471,7 @@ pub fn create_skyclave_cleric() -> Card {
 //         "Each other Angel you control enters with an additional +1/+1 counter on it for each Angel you already control.",
 //         2,
 //         2,
-//         [ManaType::Colorless, ManaType::White],
+//         [ManaType::Colorless, ManaType::Purple],
 //         [StatType::Flying, StatType::Vigilance],
 //         CardActionTrigger::new(
 //             ActionTriggerType::AbilityWithinPhases(
@@ -502,7 +483,7 @@ pub fn create_skyclave_cleric() -> Card {
 //             ),
 //             CardRequiredTarget::None,
 //             Arc::new(GenerateManaAction {
-//                 mana_to_add: vec![ManaType::White],
+//                 mana_to_add: vec![ManaType::Purple],
 //                 target: PlayerActionTarget::Owner
 //             })
 //         ),
@@ -570,7 +551,7 @@ fn create_lunarch_veteran() -> Card {
         .name("Lunarch Veteran")
         .creature_of_type(1, 1, CreatureType::Angel)
         .description("Whenever another creature you control enters, you gain 1 life.")
-        .mana_cost(vec![ManaType::White])
+        .mana_cost(vec![ManaType::Purple])
         .add_action(
             ActionBuilder::new(ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner))
                 .closure_action(|game, source, owner, target, ability_id| {
@@ -594,13 +575,13 @@ fn create_lunarch_veteran() -> Card {
 //         "At the beginning of each end step, if you gained 5 or more life this turn, create a 4/4 white Angel creature token with flying and vigilance.",
 //         3,
 //         3,
-//         // [ManaType::White, ManaType::Colorless, ManaType::Colorless],
-//         [ManaType::Colorless, ManaType::White, ManaType:: White],
+//         // [ManaType::Purple, ManaType::Colorless, ManaType::Colorless],
+//         [ManaType::Colorless, ManaType::Purple, ManaType:: Purple],
 //         [StatType::Flying],
 //         CardActionTrigger::new(
 //             ActionTriggerType::AbilityWithinPhases(
 //                 "Until end of turn, Resplendent Angel gets +2/+2 and gains lifelink.".to_string(),
-//                 vec![ManaType::Colorless, ManaType::Colorless, ManaType::Colorless, ManaType::White,ManaType::White,  ManaType::White, ],
+//                 vec![ManaType::Colorless, ManaType::Colorless, ManaType::Colorless, ManaType::Purple,ManaType::Purple,  ManaType::Purple, ],
 //                 None,
 //                 false
 //             ),
@@ -695,7 +676,7 @@ fn create_lunarch_veteran() -> Card {
 //         CardPhase::Ready,
 //         CardType::Enchantment,
 //         vec![],
-//         // vec![ManaType::White, ManaType::Colorless, ManaType::Colorless, ManaType::Colorless],
+//         // vec![ManaType::Purple, ManaType::Colorless, ManaType::Colorless, ManaType::Colorless],
 //         vec![],
 //     )
 // }
@@ -707,7 +688,7 @@ fn create_lunarch_veteran() -> Card {
 //         "Whenever an Angel you control enters, you gain 4 life.\nWhenever an Angel you control dies, create a 1/1 white Spirit creature token with flying.",
 //         1,
 //         4,
-//         [ManaType::White, ManaType::White],
+//         [ManaType::Purple, ManaType::Purple],
 //         // [],
 //         [],
 //         // CardActionTrigger::new(
@@ -933,8 +914,8 @@ fn create_lunarch_veteran() -> Card {
 //         vec![
 //             ManaType::Colorless,
 //             ManaType::Colorless,
-//             ManaType::White,
-//             ManaType::White,
+//             ManaType::Purple,
+//             ManaType::Purple,
 //         ],
 //     )
 // }
@@ -946,7 +927,7 @@ fn create_lunarch_veteran() -> Card {
 // //         "Whenever another angel or cleric enters the battlefield under your control, you gain life equal to that creature’s toughness. If you have 27 or more life, creatures you control get +2/+2.",
 // //         2,
 // //         4,
-// //         [ManaType::White, ManaType::Colorless, ManaType::Colorless],
+// //         [ManaType::Purple, ManaType::Colorless, ManaType::Colorless],
 // //         // [],
 // //         [StatType::Flying],
 // //         CardActionTrigger::new(

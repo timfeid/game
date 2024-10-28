@@ -1,6 +1,7 @@
 pub mod add_stat;
 pub mod generate_mana;
 use async_trait::async_trait;
+use futures::channel::oneshot::Canceled;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::{
@@ -49,6 +50,7 @@ impl PlayerActionTrigger {
     pub async fn applies_in_phase(&self, turn: &Turn, player: Arc<Mutex<Player>>) -> bool {
         match &self.trigger_type {
             ActionTriggerType::CardStatChanged => true,
+            ActionTriggerType::CardAttacked => true,
             ActionTriggerType::Attached => true,
             ActionTriggerType::CardDestroyed => true,
             ActionTriggerType::OtherCardDestroyed(_) => true,
@@ -103,6 +105,8 @@ impl PlayerActionTrigger {
             ActionTriggerType::CardExiled => true,
             ActionTriggerType::OtherCardExiled(_trigger_target) => true,
             ActionTriggerType::PlayerStatChanged(_) => true,
+            ActionTriggerType::OtherCardDrawn(phase_target) => true,
+            ActionTriggerType::Instant => true,
         }
     }
 }
@@ -164,6 +168,17 @@ impl CardAction for PlayCardAction {
         target: Option<FrontendTarget>,
         _ability_id: Option<String>,
     ) -> Result<(), String> {
+        let is_my_turn = game
+            .lock()
+            .await
+            .current_turn
+            .as_ref()
+            .unwrap()
+            .current_player_id
+            == player.lock().await.name.clone();
+        if !player.lock().await.can_play(&card, is_my_turn).await {
+            return Err(format!("Cannot play {} right now.", card.lock().await.name));
+        }
         if let Ok(frontend_target) = Game::frontend_target_from_card(&game, &card).await {
             game.lock()
                 .await
@@ -360,20 +375,22 @@ pub struct AsyncClosureAction {
 }
 
 impl AsyncClosureAction {
-    pub fn new(
-        closure: Arc<
-            dyn Fn(
-                    Arc<Mutex<Game>>,
-                    Arc<Mutex<Card>>,
-                    Arc<Mutex<Player>>,
-                    Option<FrontendTarget>,
-                    String,
-                ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
-                + Send
-                + Sync,
-        >,
-    ) -> Self {
-        Self { closure }
+    pub fn new<F>(closure: F) -> Self
+    where
+        F: Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Arc<Mutex<Player>>,
+                Option<FrontendTarget>,
+                String,
+            ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            closure: Arc::new(closure),
+        }
     }
 }
 
@@ -462,10 +479,10 @@ pub enum CardActionType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionTriggerType {
     CardEnteredBattlefield,
+    CardAttacked,
     CardDestroyed,
     CardStatChanged,
     CardExiled,
-    OtherCardExiled(PhaseTarget),
     // CardTapped,
     // CardTappedWithinPhases(Vec<TurnPhase>),
     // description, required mana, required phase(s), requires tap
@@ -477,6 +494,8 @@ pub enum ActionTriggerType {
         CardRequiredTarget,
     ),
     PhaseStarted(Vec<TurnPhase>, PhaseTarget),
+    OtherCardDrawn(PhaseTarget),
+    OtherCardExiled(PhaseTarget),
     OtherCardPlayed(PhaseTarget),
     OtherCardDestroyed(PhaseTarget),
     CreatureTypeCardPlayed(PhaseTarget, CreatureType),
@@ -485,6 +504,7 @@ pub enum ActionTriggerType {
     Attached,
     Detached,
     Omnipresent,
+    Instant,
 }
 
 #[async_trait::async_trait]
@@ -630,7 +650,7 @@ impl PlayerAction for DrawCardAction {
         game: Arc<Mutex<Game>>,
         player: Arc<Mutex<Player>>,
     ) -> Result<(), String> {
-        player.lock().await.draw_card();
+        Game::draw_card(game, player, None).await?;
         Ok(())
     }
 }
@@ -757,6 +777,7 @@ impl CardAction for DeclareBlockerAction {
         target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
+        println!("declare blocker??????");
         match &target {
             None => todo!(),
             Some(FrontendTarget::Player(arc)) => todo!(),
@@ -784,7 +805,7 @@ impl PlayerAction for CombatAction {
         game: Arc<Mutex<Game>>,
         player: Arc<Mutex<Player>>,
     ) -> Result<(), String> {
-        Game::resolve_combat(&game).await;
+        Game::resolve_combat(game).await;
         Ok(())
     }
 }
@@ -805,10 +826,7 @@ impl CardAction for DeclareAttackerAction {
         target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        println!(
-            "declaring \n\nattacker: {:?} \ntarget: {:?}\n\n",
-            card, target
-        );
+        println!("yeah");
         if let Some(target) = target {
             game.lock()
                 .await
@@ -919,11 +937,13 @@ impl Action for CombatDamageAction {
                 };
 
                 // Damage to defending player
-                damage_assignments.push(DamageAssignment {
+                let assignment = DamageAssignment {
                     source: attacker_arc.clone(),
                     target: self.defending_player.clone(),
                     damage: attacker_damage,
-                });
+                };
+
+                damage_assignments.push(assignment);
             }
         }
 
@@ -1218,18 +1238,32 @@ impl CardAction for DrawCardCardAction {
         target: Option<FrontendTarget>,
         ability_id: Option<String>,
     ) -> Result<(), String> {
-        let card = card_arc.lock().await;
         for _ in 0..self.count {
-            owner.lock().await.draw_card();
+            Game::draw_card(game.clone(), owner.clone(), Some(card_arc.clone())).await?;
         }
         Ok(())
+    }
+}
+
+pub struct ChosenCardDetails {
+    pub target: Arc<Mutex<Card>>,
+}
+impl ChosenCardDetails {
+    pub fn new(card: Arc<Mutex<Card>>) -> Self {
+        Self { target: card }
     }
 }
 
 #[derive(Clone)]
 pub struct ChooseFromSelectionAction {
     pub details: CardSelectionDetails,
-    pub action: Arc<dyn Fn(FrontendCardTarget) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+    pub action: Option<
+        Arc<
+            dyn Fn(ChosenCardDetails) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 impl Debug for ChooseFromSelectionAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1238,14 +1272,32 @@ impl Debug for ChooseFromSelectionAction {
 }
 
 impl ChooseFromSelectionAction {
-    pub fn new(
-        player_id: String,
-        cards: Vec<CardWithDetails>,
-        action: Arc<dyn Fn(FrontendCardTarget) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
-    ) -> Self {
+    pub fn show_only(player_id: String, cards: Vec<CardWithDetails>, message: &str) -> Self {
         ChooseFromSelectionAction {
-            details: CardSelectionDetails { player_id, cards },
-            action,
+            details: CardSelectionDetails {
+                player_id,
+                cards,
+                selection_required: false,
+                message: message.to_string(),
+            },
+            action: None,
+        }
+    }
+    pub fn new<F>(player_id: String, cards: Vec<CardWithDetails>, action: F, message: &str) -> Self
+    where
+        F: Fn(ChosenCardDetails) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + 'static
+            + Send
+            + Sync,
+    {
+        ChooseFromSelectionAction {
+            details: CardSelectionDetails {
+                player_id,
+                cards,
+                selection_required: true,
+                message: message.to_string(),
+            },
+            action: Some(Arc::new(action)),
         }
     }
 }
@@ -1311,7 +1363,6 @@ impl CardAction for CastMandatoryAdditionalAbility {
                 self.ability.clone(),
                 None,
                 self.description.clone(),
-                self.action_type.clone(),
             ))
             .await;
         } else {
@@ -1337,16 +1388,26 @@ impl Debug for CastOptionalAdditionalAbility {
 }
 
 impl CastOptionalAdditionalAbility {
-    pub fn new(
+    pub fn new<F>(
         mana: Vec<ManaType>,
         target: CardRequiredTarget,
-        ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
+        ability: F,
         description: String,
         action_type: ActionType,
-    ) -> CastOptionalAdditionalAbility {
-        let canceled = Arc::new(|card| -> Arc<dyn CardAction + Send + Sync> {
-            Arc::new(PlayCardAction {}) as Arc<dyn CardAction + Send + Sync>
-        });
+    ) -> CastOptionalAdditionalAbility
+    where
+        F: Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync + 'static,
+    {
+        // Wrap the provided ability closure in an Arc
+        let ability = Arc::new(ability);
+
+        // Define the default canceled action
+        let canceled = Arc::new(
+            |card: Arc<Mutex<Card>>| -> Arc<dyn CardAction + Send + Sync> {
+                Arc::new(BlankAction {}) as Arc<dyn CardAction + Send + Sync>
+            },
+        );
+
         CastOptionalAdditionalAbility {
             mana,
             target,
@@ -1355,6 +1416,14 @@ impl CastOptionalAdditionalAbility {
             action_type,
             canceled,
         }
+    }
+
+    pub fn canceled<F>(mut self, canceled: F) -> Self
+    where
+        F: Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync + 'static,
+    {
+        self.canceled = Arc::new(canceled);
+        self
     }
 }
 
@@ -1372,22 +1441,25 @@ impl CardAction for CastOptionalAdditionalAbility {
         ability_id: Option<String>,
     ) -> Result<(), String> {
         let can_pay_mana_cost = { owner.lock().await.can_pay_mana(&self.mana).await };
+        let ability = Ability::new(
+            card_arc.clone(),
+            owner.clone(),
+            self.mana.clone(),
+            self.target.clone(),
+            self.ability.clone(),
+            Some(self.canceled.clone()),
+            self.description.clone(),
+        );
         if can_pay_mana_cost {
+            game.lock().await.request_player_ability(ability).await;
+        } else {
+            let id = "temp".to_string();
             game.lock()
                 .await
-                .request_player_ability(Ability::new(
-                    card_arc.clone(),
-                    owner.clone(),
-                    self.mana.clone(),
-                    self.target.clone(),
-                    self.ability.clone(),
-                    Some(self.canceled.clone()),
-                    self.description.clone(),
-                    self.action_type.clone(),
-                ))
-                .await;
-        } else {
-            println!("Not enough mana to activate the ability.");
+                .async_abilities
+                .insert(id.clone(), ability);
+            println!("inserted cancel thing");
+            Game::cancel_ability(&game, id).await?;
         }
         Ok(())
     }
@@ -1464,7 +1536,7 @@ impl ActionBuilder {
             + Send
             + Sync,
     {
-        self.action = Some(Arc::new(AsyncClosureAction::new(Arc::new(action))));
+        self.action = Some(Arc::new(AsyncClosureAction::new(action)));
         self
     }
 

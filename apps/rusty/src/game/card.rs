@@ -18,6 +18,7 @@ use crate::game::action;
 use crate::game::effects::{EffectManager, EffectTarget};
 use crate::lobby::manager::AbilityDetails;
 
+use super::action::generate_mana::GenerateManaAction;
 use super::action::{
     ActionBuilder, ActionTriggerType, Attachable, CardAction, CardActionTarget, CardActionTrigger,
     CardActionWrapper, CardRequiredTarget, DeclareAttackerAction, DeclareBlockerAction,
@@ -221,7 +222,7 @@ impl CardBuilder {
                 false,
                 CardRequiredTarget::EnemyCardInCombat,
             ))
-            .action(DeclareAttackerAction {}),
+            .action(DeclareBlockerAction {}),
         );
 
         self
@@ -414,7 +415,6 @@ impl Card {
                     if &turn_phase == &TurnPhase::Main {
                         abilities.push(AbilityDetails {
                             id: trigger.id.clone(),
-                            action_type: ActionType::Attach,
                             mana_cost: vec![],
                             required_target: trigger.card_required_target.clone(),
                             description: "Attach".to_string(),
@@ -516,11 +516,6 @@ impl Card {
                         mana_cost: required_mana.clone(),
                         required_target: required_target.clone(),
                         description: description.to_string(),
-                        action_type: if *required_tap {
-                            ActionType::Tap
-                        } else {
-                            ActionType::Instant
-                        },
                         show: meets_requirements_except_mana
                             || phase_restrictions.is_none()
                             || main_phase_restriction,
@@ -587,7 +582,6 @@ impl Card {
             }
             abilities.push(AbilityDetails {
                 id: id.clone(),
-                action_type: ActionType::PlayedCard,
                 mana_cost: vec![],
                 required_target: self.play_target.clone(),
                 description: "Play".to_string(),
@@ -654,9 +648,6 @@ impl Card {
     pub async fn add_counter(card: Arc<Mutex<Self>>, game: &Arc<Mutex<Game>>, counter: Counter) {
         let id = Card::activate_counter(card.clone(), &counter, game).await;
         card.lock().await.counters.insert(id, counter);
-        todo!();
-        // let mut actions = Game::collect_card_stat_changed_actions(game, &card).await;
-        // game.lock().await.execute_actions(&mut actions).await.ok();
     }
 
     pub async fn activate_counter(
@@ -722,11 +713,14 @@ impl Card {
                 ActionTriggerType::PlayerStatChanged(_) => true,
                 ActionTriggerType::CardStatChanged => true,
                 ActionTriggerType::OtherCardExiled(trigger_target) => true,
+                ActionTriggerType::CardAttacked => true,
+                ActionTriggerType::OtherCardDrawn(phase_target) => true,
 
                 ActionTriggerType::CardEnteredBattlefield => false,
                 ActionTriggerType::Omnipresent => false,
                 ActionTriggerType::Detached => false,
                 ActionTriggerType::CardDestroyed => false,
+                ActionTriggerType::Instant => false,
             })
             .count()
             > 0;
@@ -819,9 +813,8 @@ impl Card {
         Vec<Arc<dyn Action + Send + Sync>>,
         bool,
         Vec<ManaType>,
-        bool,
+        ActionType,
     ) {
-        let mut is_spell = false;
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let mut requires_tap = false;
         let mut mana_requirements: Vec<ManaType> = vec![];
@@ -837,61 +830,49 @@ impl Card {
             .await
         };
 
-        for action_trigger in &triggers {
-            if action_trigger.id == trigger_id {
-                mana_requirements = action_trigger.mana_cost.clone();
+        let mut is_mana_ability = false;
+        let action_trigger = triggers.iter().find(|t| t.id == trigger_id);
+        if let Some(action_trigger) = action_trigger {
+            mana_requirements = action_trigger.mana_cost.clone();
 
-                if action_trigger.meets_mana_requirements
-                    && action_trigger.meets_requirements_except_mana
-                {
-                    requires_tap = action_trigger.tap_required.clone();
-                    is_spell = action_trigger.id == "play_card".to_string()
-                        && card_arc.lock().await.card_type.is_spell();
-                    actions.push(Arc::new(CardActionWrapper {
-                        card: Arc::clone(&card_arc),
-                        action: action_trigger.action.clone().expect("No action??"),
-                        target: target.clone(),
-                        ability_id: Some(action_trigger.id.clone()),
-                    }));
+            if action_trigger.meets_mana_requirements
+                && action_trigger.meets_requirements_except_mana
+            {
+                if let Some(action) = action_trigger.action.clone() {
+                    if action
+                        .as_any()
+                        .downcast_ref::<GenerateManaAction>()
+                        .is_some()
+                    {
+                        is_mana_ability = true;
+                    }
                 }
-                break;
+                requires_tap = action_trigger.tap_required.clone();
+                if action_trigger.id == "play_card" {
+                    mana_requirements = card_arc.lock().await.cost.clone();
+                }
+                actions.push(Arc::new(CardActionWrapper {
+                    card: Arc::clone(&card_arc),
+                    action: action_trigger.action.clone().expect("No action??"),
+                    target: target.clone(),
+                    ability_id: Some(action_trigger.id.clone()),
+                }));
+            } else {
+                println!("DOES NOT MEET REQUIREMENTS");
             }
-            // match &action_trigger.trigger_type {
-            //     ActionTriggerType::AbilityWithinPhases(
-            //         _,
-            //         mana_requirement,
-            //         phase_restrictions,
-            //         tap_required,
-            //     ) => {
-            //         if trigger_id != action_trigger.id {
-            //             continue;
-            //         }
-            //         mana_requirements = mana_requirement.clone();
-            //         let in_phases = phase_restrictions.is_none()
-            //             || phase_restrictions.as_ref().unwrap().0.contains(&turn_phase);
-
-            //         let meets_requirements = (action_trigger.requirements)(
-            //             Arc::clone(&game),
-            //             Arc::clone(&card_arc),
-            //             trigger_id.clone(),
-            //         )
-            //         .await;
-
-            //         if in_phases && meets_requirements {
-            //             requires_tap = tap_required.clone();
-            //             actions.push(Arc::new(CardActionWrapper {
-            //                 card: Arc::clone(&card_arc),
-            //                 action: action_trigger.action.clone(),
-            //                 target: target.clone(),
-            //                 ability_id: Some(action_trigger.id.clone()),
-            //             }));
-            //         }
-            //     }
-            //     _ => {}
-            // }
+        } else {
+            println!("WHAT IS ABILITY WITH ID {:?}??", trigger_id)
         }
 
-        (actions, requires_tap, mana_requirements, is_spell)
+        let action_type = if is_mana_ability || !card_arc.lock().await.card_type.is_spell() {
+            ActionType::ManaAbility
+        } else if trigger_id == "play_card".to_string() {
+            ActionType::Spell
+        } else {
+            ActionType::ActivatedAbility
+        };
+
+        (actions, requires_tap, mana_requirements, action_type)
     }
 
     pub async fn collect_card_destroyed_actions(

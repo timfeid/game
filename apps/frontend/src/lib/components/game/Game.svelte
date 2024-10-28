@@ -77,6 +77,7 @@
 	}
 
 	function updated(data: LobbyData) {
+		console.log(data);
 		lobby = data;
 	}
 
