@@ -802,9 +802,9 @@ impl Player {
         // Count the required mana costs
         for mana in cost {
             match mana {
-                ManaType::Purple => purple_required += 1,
+                ManaType::Influence => purple_required += 1,
                 ManaType::Blue => blue_required += 1,
-                ManaType::Gold => gold_required += 1,
+                ManaType::Fortune => gold_required += 1,
                 ManaType::Red => red_required += 1,
                 ManaType::Green => green_required += 1,
                 ManaType::Colorless => generic_required += 1,

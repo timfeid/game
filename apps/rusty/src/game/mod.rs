@@ -20,6 +20,7 @@ use action::{
 use card::{Card, CardPhase, CardType};
 use combat::Combat;
 use effects::{Effect, EffectID, EffectManager, EffectTarget};
+use futures::{channel::oneshot, stream, StreamExt};
 use mana::{ManaPool, ManaType};
 use player::Player;
 use rand::seq::index;
@@ -40,6 +41,7 @@ use crate::lobby::{
     lobby::DeckSelector,
     manager::{
         AbilityDetails, CardSelectionDetails, ExecuteAbility, LobbyCommand, LobbyTurnMessage,
+        ModalButton,
     },
 };
 
@@ -96,6 +98,8 @@ pub struct CardWithDetails {
     pub frontend_target: FrontendCardTarget,
     pub abilities: Vec<AbilityDetails>,
     pub attached_to: Option<FrontendCardTarget>,
+    pub stats: HashMap<StatType, i16>,
+    pub incremental_counters: HashMap<String, i16>,
 }
 
 impl CardWithDetails {
@@ -108,12 +112,16 @@ impl CardWithDetails {
 
         let abilities = card.abilities(TurnPhase::Main, true, None).await;
         let attached_to = None;
+        let stats = HashMap::new();
+        let incremental_counters = HashMap::new();
 
         CardWithDetails {
             card,
             abilities,
             frontend_target,
             attached_to,
+            stats,
+            incremental_counters,
         }
     }
 
@@ -135,14 +143,19 @@ impl CardWithDetails {
             .abilities(
                 phase,
                 frontend_target.pile == FrontendPileName::Play,
-                Some((card_arc, game)),
+                Some((card_arc.clone(), game)),
             )
             .await;
+        let stats = card_arc.lock().await.stats.to_hashmap();
+        let incremental_counters = card_arc.lock().await.get_incremental_counters();
+
         CardWithDetails {
             card,
             abilities,
             frontend_target,
             attached_to,
+            stats,
+            incremental_counters,
         }
     }
 }
@@ -206,13 +219,13 @@ pub enum FrontendPileName {
     Graveyard,
 }
 
-#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+#[derive(Type, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum FrontendTarget {
     Card(FrontendCardTarget),
     Player(String),
 }
 
-#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+#[derive(Type, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct FrontendCardTarget {
     pub player_id: String,
     pub pile: FrontendPileName,
@@ -494,6 +507,24 @@ impl Game {
         false
     }
 
+    pub async fn respond_card_selection_button(
+        game: &Arc<Mutex<Game>>,
+        player: &Arc<Mutex<Player>>,
+        button_id: String,
+    ) -> Result<(), String> {
+        let choose_action = game.lock().await.choose_action.clone();
+        if let Some(ability) = choose_action {
+            if let Some(action) = ability.details.buttons.iter().find(|b| b.id == button_id) {
+                if let Some(action) = &action.action {
+                    (action)().await?;
+                }
+            }
+        }
+        game.lock().await.choose_action = None;
+
+        Ok(())
+    }
+
     pub async fn respond_card_selection(
         game: &Arc<Mutex<Game>>,
         player: &Arc<Mutex<Player>>,
@@ -504,7 +535,7 @@ impl Game {
             let choose_action = game.lock().await.choose_action.clone();
             if let Some(ability) = choose_action {
                 if let Some(action) = ability.action {
-                    (action)(ChosenCardDetails::new(card_arc)).await?;
+                    (action)(ChosenCardDetails::new(card_arc, card.clone())).await?;
                 }
             }
         }
@@ -665,7 +696,7 @@ impl Game {
 
     pub async fn player_from_id(
         game: &Arc<Mutex<Game>>,
-        id: String,
+        id: &str,
     ) -> Result<(usize, Arc<Mutex<Player>>), String> {
         let players = game.lock().await.players.clone();
         for (index, player) in players.iter().enumerate() {
@@ -1153,9 +1184,16 @@ impl Game {
     ) -> Result<(), String> {
         game.lock().await.remove_references_to(card).await;
         Game::remove_card_from_current_pile(game, card).await;
+
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = vec![];
         let owner = card.lock().await.owner.clone();
         if let Some(card_owner) = &owner {
+            card_owner
+                .lock()
+                .await
+                .deck
+                .graveyard
+                .push(Arc::clone(card));
             let players = game.lock().await.players.clone();
             for (player_index, player) in players.iter().enumerate() {
                 let cards_in_play = player.lock().await.cards_in_play.clone();
@@ -1241,7 +1279,7 @@ impl Game {
             trigger_id.clone(),
             game,
         )
-        .await;
+        .await?;
 
         {
             // Check if it's the player's priority turn
@@ -1805,7 +1843,7 @@ impl Game {
                     println!("Player {}'s priority turn has started.", player.name);
                 }
 
-                let initial_time_limit = if i == 0 { 7 } else { 3 };
+                let initial_time_limit = if i == 0 { 0 } else { 3 };
 
                 {
                     let mut game = game_arc.lock().await;
@@ -2170,7 +2208,7 @@ impl Game {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let cards = {
             let mut player = player.lock().await;
-            player.add_stat_type(stat_type, amount).await;
+            player.add_stat_type(stat_type.clone(), amount).await;
             player.cards_in_play.clone()
         };
 
@@ -2207,6 +2245,7 @@ impl Game {
         cards: Vec<Arc<Mutex<Card>>>,
         action: F,
         message: &str,
+        selection_required: bool,
     ) where
         F: Fn(ChosenCardDetails) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
             + 'static
@@ -2215,18 +2254,214 @@ impl Game {
     {
         let mut cards_with_detail = vec![];
         for card in cards {
-            println!("{:?}", card);
             let with_detail = CardWithDetails::from_card_arc(Arc::clone(game), card).await;
             cards_with_detail.push(with_detail);
         }
-        println!("got card with detail?");
-        let selection_action =
-            ChooseFromSelectionAction::new(player_id, cards_with_detail, action, message);
+        let selection_action = ChooseFromSelectionAction::new(
+            player_id,
+            cards_with_detail,
+            action,
+            message,
+            selection_required,
+        );
         game.lock()
             .await
             .ask_choose_from_selection(selection_action)
             .await;
-        println!("we are outta here?");
+    }
+
+    async fn show_cards_to_all_except(
+        game: &Arc<Mutex<Game>>,
+        cards: Vec<Arc<Mutex<Card>>>,
+        message: &str,
+        player_id: String,
+    ) {
+        let players = game.lock().await.players.clone();
+        for player in &players {
+            let current_player_id = player.lock().await.name.clone();
+            if player_id == current_player_id {
+                continue;
+            }
+            let mut cards_with_detail = vec![];
+            for card in cards.clone() {
+                let with_detail = CardWithDetails::from_card_arc(Arc::clone(game), card).await;
+                cards_with_detail.push(with_detail);
+            }
+            let selection_action =
+                ChooseFromSelectionAction::show_only(current_player_id, cards_with_detail, message);
+            game.lock()
+                .await
+                .ask_choose_from_selection(selection_action)
+                .await;
+        }
+    }
+
+    async fn show_cards_to_all(
+        game: &Arc<Mutex<Game>>,
+        cards: Vec<Arc<Mutex<Card>>>,
+        message: &str,
+    ) {
+        let players = game.lock().await.players.clone();
+        for player in &players {
+            let player_id = player.lock().await.name.clone();
+            let mut cards_with_detail = vec![];
+            for card in cards.clone() {
+                let with_detail = CardWithDetails::from_card_arc(Arc::clone(game), card).await;
+                cards_with_detail.push(with_detail);
+            }
+            let selection_action =
+                ChooseFromSelectionAction::show_only(player_id, cards_with_detail, message);
+            game.lock()
+                .await
+                .ask_choose_from_selection(selection_action)
+                .await;
+        }
+    }
+
+    async fn scry(
+        game: Arc<Mutex<Game>>,
+        player: Arc<Mutex<Player>>,
+        mut top_cards: Vec<CardWithDetails>,
+    ) -> Result<(), String> {
+        // Clone the player's name for identification
+        let player_id = player.lock().await.name.clone();
+        let total = top_cards.len();
+
+        // Shared Sender to communicate between the closure and the main loop
+        let sender_shared = Arc::new(Mutex::new(None));
+        let selected_cards = Arc::new(Mutex::new(vec![]));
+
+        // Loop until all cards are arranged or the player cancels
+        while !top_cards.is_empty() {
+            // Create a one-shot channel to wait for the player's selection
+            let (tx, rx) = oneshot::channel();
+
+            {
+                // Assign the sender to the shared sender
+                let mut sender_lock = sender_shared.lock().await;
+                *sender_lock = Some(tx);
+            }
+
+            // Clone necessary Arcs for the closure
+            let game_clone = game.clone();
+            let player_clone = player.clone();
+            let display_cards = top_cards.clone();
+            let sender_shared_clone = sender_shared.clone();
+            let selected_cards_clone = selected_cards.clone();
+            let message = format!(
+                "Look at the top {} cards of your library. You may rearrange them in any order or put them on the bottom of your library.\n\n {}",
+                total, if top_cards.len() == total{
+                    "Choose one card you would like on top, or put them all at the bottom."
+                } else {
+                    "Choose the next card or put them all at the bottom."
+                }
+            );
+
+            // Define a new ChooseFromSelectionAction for the current set of cards
+            let mut scry_action = ChooseFromSelectionAction::new(
+                player_id.clone(),
+                display_cards,
+                move |chosen_card| {
+                    let sender_shared_clone = sender_shared_clone.clone();
+                    let selected_cards_clone = selected_cards_clone.clone();
+                    Box::pin(async move {
+                        // Access the shared sender and send the chosen card
+                        let mut sender_lock = sender_shared_clone.lock().await;
+                        if let Some(tx) = sender_lock.take() {
+                            // Send Some(chosen_card) to indicate a card was selected
+                            let _ = tx.send(Some(chosen_card));
+                        }
+                        Ok(())
+                    })
+                },
+                message.as_str(),
+                true,
+            );
+
+            // Add a button to place the rest on the bottom of the deck
+            let sender_shared_clone = sender_shared.clone();
+            scry_action.details.buttons.push(ModalButton::new(
+                "Place the rest on the bottom of the deck",
+                move || {
+                    let sender_shared_clone = sender_shared_clone.clone();
+                    Box::pin(async move {
+                        let mut sender_lock = sender_shared_clone.lock().await;
+                        if let Some(tx) = sender_lock.take() {
+                            // Send None to indicate placing remaining cards on the bottom
+                            let _ = tx.send(None);
+                        }
+                        Ok(())
+                    })
+                },
+            ));
+
+            // Apply the action to the game
+            {
+                println!("Prompting player for card selection...");
+                let mut game_guard = game.lock().await;
+                game_guard.choose_action = Some(scry_action.clone());
+                game_guard.ask_choose_from_selection(scry_action).await;
+            }
+
+            // Wait for the player's selection
+            match rx.await {
+                Ok(chosen_card_option) => {
+                    if let Some(chosen_card) = chosen_card_option {
+                        // Add the chosen card to selected_cards
+                        selected_cards.lock().await.push(chosen_card.target.clone());
+                        // Remove the chosen card from top_cards
+                        top_cards.retain(|card| {
+                            println!(
+                                "\n\n\ncomparing {:?} with {:?}\n\n\n",
+                                card.frontend_target, chosen_card.frontend_target
+                            );
+                            card.frontend_target != chosen_card.frontend_target
+                        });
+                    } else {
+                        // Player chose to place the rest on the bottom
+                        break;
+                    }
+                }
+                Err(err) => {
+                    // If the player cancels, exit the loop gracefully
+                    println!("Player canceled scry: {:?}", err);
+                    break;
+                }
+            }
+        }
+
+        // After the loop, arrange the deck accordingly
+        {
+            // Get the selected cards in the order they were selected
+            let selected = selected_cards.lock().await.clone();
+
+            // Reverse the selected cards to have the first selected on top
+            let mut selected_reversed = selected.clone();
+            selected_reversed.reverse();
+
+            for selected_card in selected_reversed.iter() {
+                // Find the card in the deck by `frontend_target`
+                Game::remove_card_from_current_pile(&game, selected_card).await;
+                player
+                    .lock()
+                    .await
+                    .deck
+                    .draw_pile
+                    .push(Arc::clone(selected_card));
+            }
+
+            // Append the remaining top_cards to the bottom of the deck
+            // player.lock().await.deck.draw_pile.extend(top_cards.iter().map(|c| c.frontend_target).clone());
+            for card in top_cards {
+                let card = Game::card_from_frontend_card_target(&game, &card.frontend_target).await;
+                player.lock().await.deck.draw_pile.insert(0, card);
+            }
+        }
+
+        game.lock().await.refresh_clients();
+
+        println!("Scry completed successfully.");
+        Ok(())
     }
 
     async fn show_cards(

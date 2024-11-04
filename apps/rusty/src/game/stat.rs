@@ -33,7 +33,7 @@ pub struct StatManager {
     pub listeners: Vec<Arc<Box<dyn CardStatChangeListener + Send + Sync>>>, // Use Arc<Mutex> for shared ownership
 }
 
-#[derive(Type, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatType {
     Health,
     Power,
@@ -46,7 +46,6 @@ pub enum StatType {
     Regenerate,
     Deathtouch,
     Vigilance,
-    Counter,
     Haist,
 }
 
@@ -106,6 +105,7 @@ impl Stats for StatManager {
             .iter()
             .filter(|(_id, s)| s.stat_type == stat_type)
             .map(|(_id, s)| s.intensity)
+            .filter(|i| i != &0)
             .sum()
     }
 
@@ -138,5 +138,15 @@ impl StatManager {
 
     pub fn add_listener(&mut self, listener: Arc<Box<dyn CardStatChangeListener + Send + Sync>>) {
         self.listeners.push(listener);
+    }
+
+    pub fn to_hashmap(&self) -> HashMap<StatType, i16> {
+        let mut aggregated_stats = HashMap::new();
+
+        for stat in self.stats.values() {
+            *aggregated_stats.entry(stat.stat_type.clone()).or_insert(0) += stat.intensity;
+        }
+
+        aggregated_stats
     }
 }

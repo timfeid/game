@@ -9,8 +9,11 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::timeout;
 use tokio_stream::wrappers::ReceiverStream;
+use ulid::Ulid;
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -28,7 +31,8 @@ use crate::game::{
     ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
 };
 use crate::http::controllers::lobby::{
-    ActionCardArgs, RespondCardSelection, RespondMandatoryAbility, RespondOptionalAbility,
+    ActionCardArgs, RespondCardSelection, RespondCardSelectionButton, RespondMandatoryAbility,
+    RespondOptionalAbility,
 };
 use crate::services::jwt::{Claims, JwtService};
 
@@ -43,12 +47,45 @@ pub struct LobbyTurnMessage {
     pub messages: Vec<String>,
 }
 
+#[derive(Type, Deserialize, Clone, Serialize)]
+pub struct ModalButton {
+    pub id: String,
+    pub text: String,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    pub action: Option<
+        Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>,
+    >,
+}
+impl ModalButton {
+    pub(crate) fn new<F>(text: &str, action: F) -> Self
+    where
+        F: Fn() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync + 'static,
+    {
+        Self {
+            id: Ulid::new().to_string(),
+            text: text.to_string(),
+            action: Some(Arc::new(action)),
+        }
+    }
+}
+
+impl std::fmt::Debug for ModalButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModalButton")
+            .field("id", &self.id)
+            .field("text", &self.text)
+            .finish()
+    }
+}
+
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
 pub struct CardSelectionDetails {
     pub player_id: String,
     pub cards: Vec<CardWithDetails>,
     pub selection_required: bool,
     pub message: String,
+    pub buttons: Vec<ModalButton>,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -267,6 +304,40 @@ impl LobbyManager {
                 .action_card(args.card, args.target, args.trigger_id)
                 .await?;
         }
+
+        Ok(())
+    }
+
+    pub async fn respond_card_selection_button(
+        &self,
+        args: RespondCardSelectionButton,
+        user: &Claims,
+    ) -> AppResult<()> {
+        let lobby_id = args.code;
+        {
+            let hash_map = self.lobbies.lock().await;
+            let lobby = hash_map
+                .get(&lobby_id)
+                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let player = lobby
+                .lock()
+                .await
+                .data
+                .game_state
+                .players
+                .get(&user.sub)
+                .unwrap()
+                .player
+                .clone();
+
+            lobby
+                .lock()
+                .await
+                .respond_card_selection_button(player, args.button_id)
+                .await?;
+        }
+        // lobby.lock().await.message(user, args.text);
+        self.notify_lobby(&lobby_id).await.ok();
 
         Ok(())
     }

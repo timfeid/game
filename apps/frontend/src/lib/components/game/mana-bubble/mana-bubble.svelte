@@ -1,22 +1,22 @@
 <script lang="ts">
 	import type { DeckSelector, ManaType } from '@gangsta/rusty';
+	import { manaColors } from '../../../colors';
 
-	export let color: ManaType;
-	export let count: number | undefined = undefined;
+	interface Props {
+		color: ManaType;
+		count?: number;
+		class?: string;
+	}
 
-	export let className: string = '';
-	export { className as class };
+	let { color, count, class: className }: Props = $props();
+
+	const hexColor = $derived(manaColors[color.toLowerCase()]);
 </script>
 
 <div
 	class="w-3 h-3 flex items-center justify-center rounded-full border border-black dark:border-white shrink-0 font-mono text-[10px] relative font-medium {className}"
-	class:bg-green-400={color.toLowerCase() === 'green'}
-	class:bg-red-400={color.toLowerCase() === 'red'}
-	class:bg-blue-400={color.toLowerCase() === 'blue'}
-	class:bg-gray-950={color.toLowerCase() === 'black'}
-	class:bg-white={color.toLowerCase() === 'white'}
 	class:dark:border-0={color.toLowerCase() === 'white'}
-	class:!border-gray-500={color.toLowerCase() === 'colorless'}
+	style="background: {hexColor}; "
 >
 	<div>
 		{#if (count || 0) > 1}

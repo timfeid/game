@@ -19,6 +19,12 @@ use crate::{
 };
 
 #[derive(Type, Serialize, Deserialize)]
+pub struct RespondCardSelectionButton {
+    pub code: String,
+    pub button_id: String,
+}
+
+#[derive(Type, Serialize, Deserialize)]
 pub struct RespondCardSelection {
     pub code: String,
     pub target: Option<FrontendTarget>,
@@ -262,6 +268,18 @@ impl LobbyController {
         };
         let async_stream = async_stream;
         async_stream
+    }
+
+    pub(crate) async fn respond_card_selection_button(
+        ctx: Ctx,
+        args: RespondCardSelectionButton,
+    ) -> AppResult<()> {
+        let user = ctx.required_user()?;
+        ctx.lobby_manager
+            .respond_card_selection_button(args, user)
+            .await?;
+
+        Ok(())
     }
 
     pub(crate) async fn respond_card_selection(

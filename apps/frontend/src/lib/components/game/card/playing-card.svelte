@@ -5,10 +5,12 @@
 		CardPhase,
 		CardType,
 		CardWithDetails,
+		Counter,
 		FrontendPileName,
 		FrontendTarget,
 		GameState,
-		ManaType
+		ManaType,
+		StatType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
 	import ManaBubble from '../mana-bubble/mana-bubble.svelte';
@@ -21,6 +23,7 @@
 	import { RSPCError } from '@rspc/client';
 	import ManaBubbleList from '../mana-bubble/mana-bubble-list.svelte';
 	import type { Snippet } from 'svelte';
+	import { manaColors } from '../../../colors';
 
 	interface Props {
 		cardWithDetails: CardWithDetails;
@@ -75,29 +78,26 @@
 	}
 
 	// Function to display the card's stats
-	function displayStats(stats: (typeof card)['stats']) {
-		return Object.values(stats.stats).map((stat) => {
-			return `${stat.stat_type}: ${stat.intensity}`;
-		});
-	}
+	// function displayStats(stats: (typeof card)['stats']) {
+	// 	return Object.values(stats.stats).map((stat) => {
+	// 		return `${stat.stat_type}: ${stat.intensity}`;
+	// 	});
+	// }
 
-	function displayOtherStats(stats: (typeof card)['stats']) {
-		return Object.values(stats.stats).filter(
-			(stat) =>
-				stat.stat_type !== 'Power' && stat.stat_type !== 'Toughness' && stat.stat_type !== 'Counter'
-		);
+	function displayOtherStats(stats: (typeof cardWithDetails)['stats']) {
+		return Object.entries(stats).filter((stat) => stat[0] !== 'Power' && stat[0] !== 'Toughness');
 	}
 
 	let damage = $state(0);
 	let defense = $state(0);
-	function extractDamageAndDefense(stats: (typeof card)['stats']) {
+	function extractDamageAndDefense(stats: (typeof cardWithDetails)['stats']) {
 		let p = 0;
 		let t = 0;
-		for (let stat of Object.values(stats.stats)) {
-			if (stat.stat_type === 'Power') {
-				p += stat.intensity;
-			} else if (stat.stat_type === 'Toughness') {
-				t += stat.intensity;
+		for (let stat of Object.entries(stats)) {
+			if (stat[0] === 'Power') {
+				p += stat[1];
+			} else if (stat[0] === 'Toughness') {
+				t += stat[1];
 			}
 		}
 		damage = p;
@@ -106,7 +106,7 @@
 
 	$effect(() => {
 		if (card) {
-			extractDamageAndDefense(card.stats);
+			extractDamageAndDefense(cardWithDetails.stats);
 		}
 	});
 
@@ -130,17 +130,8 @@
 	// 		? card.card_type.AdvancedLand
 	// 		: null;
 
-	const manaColors = {
-		Red: '#f44336',
-		Green: '#4caf50',
-		Blue: '#2196f3',
-		Black: '#000000',
-		White: '#ffffff',
-		Colorless: '#dddddd'
-	};
-
-	let manaTypeOne: ManaType | null = $state(null);
-	let manaTypeTwo: ManaType | null = $state(null);
+	let manaTypeOne: string | null = $state(null);
+	let manaTypeTwo: string | null = $state(null);
 	$effect(() => {
 		manaTypeOne = null;
 		manaTypeTwo = null;
@@ -177,7 +168,7 @@
 						);
 						if (maybeAbilities.length) {
 							throw new Error(
-								`Not enough mana to cast ${maybeAbilities[0].action_type} for ${card.name}`
+								`Not enough mana to cast ${maybeAbilities[0].description} for ${card.name}`
 							);
 						}
 						throw new Error('This card has no ability right now.');
@@ -212,6 +203,12 @@
 	}
 
 	const shownAbilities = $derived(cardWithDetails.abilities.filter((a) => a.show));
+
+	function getCounterKey(counter: Counter) {
+		if ('PowerToughnessModifier' in counter) {
+			return `${counter.PowerToughnessModifier[0]}/${counter.PowerToughnessModifier[1]}`;
+		}
+	}
 </script>
 
 <button
@@ -249,8 +246,10 @@
 	<div
 		class="card-main relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
 		style="--mana-color: {manaTypeOne
-			? manaColors[manaTypeOne]
-			: 'transparent'}; --mana-color-2: {manaTypeTwo ? manaColors[manaTypeTwo] : 'transparent'}"
+			? manaColors[manaTypeOne.toLowerCase()]
+			: 'transparent'}; --mana-color-2: {manaTypeTwo
+			? manaColors[manaTypeTwo.toLowerCase()]
+			: 'transparent'}"
 	>
 		<div
 			class="card-header flex items-center justify-between w-full py-0.5 px-2 bg-gradient-to-br from-[var(--mana-color)]
@@ -258,6 +257,8 @@
 		>
 			<h2 class="text-xs leading-6 font-bold truncate">
 				{card.name}
+				{manaTypeOne}
+				{manaTypeTwo}
 			</h2>
 			<ManaBubbleList mana={card.cost} />
 		</div>
@@ -283,14 +284,18 @@
 				</div>
 			{:else if card.card_type === 'Planeswalker'}
 				<div class="ml-auto">
-					{Object.values(card.stats.stats).find((x) => x.stat_type === 'Counter')?.intensity}
+					{Object.entries(cardWithDetails.incremental_counters)
+						.find((x) => {
+							return x[0] === 'plainswalker';
+						})
+						?.at(1)}
 				</div>
 			{/if}
 		</div>
 
 		<div class="text-xs text-left px-2">
 			<ul class="flex space-x-2 text-gray-700 dark:text-gray-300 uppercase font-semibold">
-				{#each displayOtherStats(card.stats) as stat}
+				{#each displayOtherStats(cardWithDetails.stats) as stat}
 					{#each Object.keys(stat) as key}
 						{#if key != 'intensity'}
 							<li>
@@ -320,15 +325,22 @@
 			{#if card.card_type === 'Creature' && Object.values(card.counters).length > 0}
 				<div class=" text-muted">Counters</div>
 				<div class="flex space-x-2">
+					{#each Object.entries(cardWithDetails.incremental_counters) as [key, count]}
+						<div>
+							{count}x {key}
+						</div>
+					{/each}
 					{#each Object.entries(Object.values(card.counters).reduce((acc, counter) => {
-							const key = `${counter.PowerToughnessModifier[0]}/${counter.PowerToughnessModifier[1]}`;
-							if (!acc[key]) {
-								acc[key] = 1;
-							} else {
-								acc[key]++;
-							}
-							return acc;
-						}, {})) as [key, count]}
+								const key = getCounterKey(counter);
+								if (key) {
+									if (!acc[key]) {
+										acc[key] = 1;
+									} else {
+										acc[key]++;
+									}
+								}
+								return acc;
+							}, {} as Record<string, number>)) as [key, count]}
 						<div>
 							{count}x {key}
 						</div>

@@ -400,13 +400,13 @@ impl Effect for StatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     card.stats
-                        .add_stat(id, Stat::new(self.stat_type, self.amount));
+                        .add_stat(id, Stat::new(self.stat_type.clone(), self.amount));
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
                     player
                         .stat_manager
-                        .add_stat(id, Stat::new(self.stat_type, self.amount));
+                        .add_stat(id, Stat::new(self.stat_type.clone(), self.amount));
                 }
             }
             self.applied = true;
@@ -555,20 +555,23 @@ impl Effect for DynamicStatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     if self.permanent_change {
-                        card.stats.modify_stat(self.stat_type, amount);
+                        card.stats.modify_stat(self.stat_type.clone(), amount);
                     } else {
                         // println!("{} should get {} {}", card.name, id, amount);
-                        card.stats.add_stat(id, Stat::new(self.stat_type, amount));
+                        card.stats
+                            .add_stat(id, Stat::new(self.stat_type.clone(), amount));
                     }
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
                     if self.permanent_change {
-                        player.stat_manager.modify_stat(self.stat_type, amount);
+                        player
+                            .stat_manager
+                            .modify_stat(self.stat_type.clone(), amount);
                     } else {
                         player
                             .stat_manager
-                            .add_stat(id, Stat::new(self.stat_type, amount));
+                            .add_stat(id, Stat::new(self.stat_type.clone(), amount));
                     }
                 }
             }

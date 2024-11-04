@@ -1,3 +1,5 @@
+import type { ManaType } from '@gangsta/rusty';
+
 const colors = ['#C7115A', '#9F4576', '#006853', '#6C17A6', '#255FD1', '#00778F', '#D9461A'];
 
 export function getColor(str: string) {
@@ -18,3 +20,12 @@ function hexToRgb(hex: string) {
 
 	return { r, g, b };
 }
+
+export const manaColors: Record<string, string> = {
+	red: '#f44336',
+	green: '#4caf50',
+	blue: '#2196f3',
+	fortune: '#f59e0b',
+	influence: '#7e22ce',
+	colorless: 'transparent'
+};

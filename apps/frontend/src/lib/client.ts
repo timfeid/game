@@ -11,12 +11,17 @@ import { isPast } from 'date-fns/isPast';
 const transport = new FetchTransport(PUBLIC_API_URL, async (input, init) => {
 	const at = get(accessToken);
 	const refreshing = input.toString().includes('refresh_token');
-	if (at && !refreshing) {
-		const payload = decodeJwt(at);
-		if (browser && isPast(new Date(payload.exp! * 1000))) {
-			// console.log('refreshing access token');
-			await refreshAccessToken();
+	console.log('here?');
+	try {
+		if (at && !refreshing) {
+			const payload = decodeJwt(at);
+			if (browser && isPast(new Date(payload.exp! * 1000))) {
+				// console.log('refreshing access token');
+				await refreshAccessToken();
+			}
 		}
+	} catch (e) {
+		console.error(e);
 	}
 
 	return fetch(input, {

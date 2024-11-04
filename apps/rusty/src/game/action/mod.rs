@@ -528,6 +528,25 @@ pub struct CardActionWrapper {
     pub ability_id: Option<String>,
 }
 
+impl CardActionWrapper {
+    pub fn new<F>(
+        action: F,
+        card: Arc<Mutex<Card>>,
+        target: Option<FrontendTarget>,
+        ability_id: Option<String>,
+    ) -> Self
+    where
+        F: CardAction + Send + Sync,
+    {
+        Self {
+            action: Arc::new(action),
+            card,
+            target,
+            ability_id,
+        }
+    }
+}
+
 impl Debug for CardActionWrapper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CardActionWrapper")
@@ -1247,10 +1266,14 @@ impl CardAction for DrawCardCardAction {
 
 pub struct ChosenCardDetails {
     pub target: Arc<Mutex<Card>>,
+    pub frontend_target: FrontendCardTarget,
 }
 impl ChosenCardDetails {
-    pub fn new(card: Arc<Mutex<Card>>) -> Self {
-        Self { target: card }
+    pub fn new(card: Arc<Mutex<Card>>, frontend_target: FrontendCardTarget) -> Self {
+        Self {
+            target: card,
+            frontend_target,
+        }
     }
 }
 
@@ -1279,11 +1302,18 @@ impl ChooseFromSelectionAction {
                 cards,
                 selection_required: false,
                 message: message.to_string(),
+                buttons: vec![],
             },
             action: None,
         }
     }
-    pub fn new<F>(player_id: String, cards: Vec<CardWithDetails>, action: F, message: &str) -> Self
+    pub fn new<F>(
+        player_id: String,
+        cards: Vec<CardWithDetails>,
+        action: F,
+        message: &str,
+        selection_required: bool,
+    ) -> Self
     where
         F: Fn(ChosenCardDetails) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
             + 'static
@@ -1294,8 +1324,9 @@ impl ChooseFromSelectionAction {
             details: CardSelectionDetails {
                 player_id,
                 cards,
-                selection_required: true,
+                selection_required,
                 message: message.to_string(),
+                buttons: vec![],
             },
             action: Some(Arc::new(action)),
         }
@@ -1379,7 +1410,6 @@ pub struct CastOptionalAdditionalAbility {
     pub ability: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
     pub canceled: Arc<dyn Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync>,
     pub description: String,
-    pub action_type: ActionType,
 }
 impl Debug for CastOptionalAdditionalAbility {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1393,7 +1423,6 @@ impl CastOptionalAdditionalAbility {
         target: CardRequiredTarget,
         ability: F,
         description: String,
-        action_type: ActionType,
     ) -> CastOptionalAdditionalAbility
     where
         F: Fn(Arc<Mutex<Card>>) -> Arc<dyn CardAction + Send + Sync> + Send + Sync + 'static,
@@ -1413,7 +1442,6 @@ impl CastOptionalAdditionalAbility {
             target,
             ability,
             description,
-            action_type,
             canceled,
         }
     }
@@ -1523,6 +1551,111 @@ impl ActionBuilder {
         }
     }
 
+    pub fn optional_closure_action_passing_target<F>(
+        mut self,
+        description: &str,
+        accepted: F,
+        canceled: Option<F>,
+    ) -> Self
+    where
+        F: Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Arc<Mutex<Player>>,
+                Option<FrontendTarget>,
+                String,
+            ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + 'static
+            + Send
+            + Sync,
+    {
+        // Create the CastOptionalAdditionalAbility with necessary parameters
+        let accepted = Arc::new(accepted);
+        let description = description.to_string();
+
+        let action = AsyncClosureAction::new(move |game, source, owner, target, ability_id| {
+            let target = target.clone();
+            let source = source.clone();
+            let description = description.clone();
+            let accepted = accepted.clone();
+
+            Box::pin(async move {
+                let target_cloned = target.clone();
+                let abilit = Arc::new(CastOptionalAdditionalAbility::new(
+                    vec![],
+                    CardRequiredTarget::None,
+                    move |_card| {
+                        let target = target_cloned.clone();
+                        let accepted = accepted.clone();
+                        Arc::new(AsyncClosureAction::new(
+                            move |game, source, owner, _target, ability_id| {
+                                accepted(game, source, owner, target.clone(), ability_id)
+                            },
+                        ))
+                    },
+                    description,
+                ));
+
+                let action = Arc::new(CardActionWrapper {
+                    ability_id: Some(ability_id.clone()),
+                    card: source,
+                    action: abilit,
+                    target: target.clone(),
+                });
+                Game::execute_actions(game, vec![action]).await?;
+                Ok(())
+            })
+        });
+        self.action = Some(Arc::new(action));
+        self
+    }
+
+    pub fn optional_closure_action<F>(
+        mut self,
+        description: &str,
+        action: F,
+        canceled: Option<F>,
+    ) -> Self
+    where
+        F: Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Arc<Mutex<Player>>,
+                Option<FrontendTarget>,
+                String,
+            ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + 'static
+            + Send
+            + Sync,
+    {
+        // Create the CastOptionalAdditionalAbility with necessary parameters
+
+        let ability = Arc::new(AsyncClosureAction::new(action));
+        let mut optional_ability = CastOptionalAdditionalAbility::new(
+            vec![],                       // No mana cost
+            CardRequiredTarget::None,     // No target required
+            move |_card| ability.clone(), // Ability closure
+            description.to_string(),
+        );
+        if let Some(canceled) = canceled {
+            optional_ability = optional_ability.canceled(move |_card| {
+                // Define the canceled action if needed
+                Arc::new(AsyncClosureAction::new(
+                    |game, card, player, target, ability_id| {
+                        Box::pin(async move {
+                            // Define what happens if the action is canceled
+                            println!("Action was canceled.");
+                            Ok(())
+                        })
+                    },
+                ))
+            });
+        }
+
+        self.action = Some(Arc::new(optional_ability));
+        self
+    }
+
     pub fn closure_action<F>(mut self, action: F) -> Self
     where
         F: Fn(
@@ -1576,5 +1709,69 @@ impl ActionBuilder {
             self.action.unwrap(),
             self.requirements,
         )
+    }
+}
+
+pub struct OptionalClosureAction {
+    description: String,
+    action: Arc<
+        dyn Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Arc<Mutex<Player>>,
+                Option<FrontendTarget>,
+                Option<String>,
+            ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+            + Send
+            + Sync,
+    >,
+}
+
+impl Debug for OptionalClosureAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OptionalClosureAction")
+            .field("description", &self.description);
+        Ok(())
+    }
+}
+
+impl OptionalClosureAction {
+    pub fn new(
+        description: String,
+        action: Arc<
+            dyn Fn(
+                    Arc<Mutex<Game>>,
+                    Arc<Mutex<Card>>,
+                    Arc<Mutex<Player>>,
+                    Option<FrontendTarget>,
+                    Option<String>,
+                ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
+        Self {
+            description,
+            action,
+        }
+    }
+}
+
+#[async_trait]
+impl CardAction for OptionalClosureAction {
+    async fn apply(
+        &self,
+        game: Arc<Mutex<Game>>,
+        card: Arc<Mutex<Card>>,
+        owner: Arc<Mutex<Player>>,
+        target: Option<FrontendTarget>,
+        ability_id: Option<String>,
+    ) -> Result<(), String> {
+        (self.action)(game, card, owner, target, ability_id).await?;
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }

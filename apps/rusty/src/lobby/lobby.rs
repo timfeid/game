@@ -277,6 +277,18 @@ impl Lobby {
         self
     }
 
+    pub async fn respond_card_selection_button(
+        &mut self,
+        player: Arc<Mutex<Player>>,
+        button_id: String,
+    ) -> AppResult<()> {
+        Game::respond_card_selection_button(&self.game, &player, button_id)
+            .await
+            .map_err(|x| AppError::BadRequest(x))?;
+
+        Ok(())
+    }
+
     pub async fn respond_card_selection(
         &mut self,
         player: Arc<Mutex<Player>>,

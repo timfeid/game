@@ -3,9 +3,9 @@ use specta::Type;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Type, Copy)]
 pub enum ManaType {
-    Purple,    // {P}
+    Influence, // {P}
     Blue,      // {U}
-    Gold,      // {D}
+    Fortune,   // {D}
     Red,       // {R}
     Green,     // {G}
     Colorless, // {C}
@@ -14,9 +14,9 @@ pub enum ManaType {
 impl ManaType {
     pub fn format(&self) -> String {
         match self {
-            ManaType::Purple => "{P}".to_string(),
+            ManaType::Influence => "{P}".to_string(),
             ManaType::Blue => "{U}".to_string(),
-            ManaType::Gold => "{G}".to_string(),
+            ManaType::Fortune => "{G}".to_string(),
             ManaType::Red => "{R}".to_string(),
             ManaType::Green => "{G}".to_string(),
             ManaType::Colorless => "{C}".to_string(),
@@ -40,13 +40,13 @@ impl ManaPool {
         let mut mana_vec = Vec::new();
 
         for _ in 0..self.purple {
-            mana_vec.push(ManaType::Purple);
+            mana_vec.push(ManaType::Influence);
         }
         for _ in 0..self.blue {
             mana_vec.push(ManaType::Blue);
         }
         for _ in 0..self.gold {
-            mana_vec.push(ManaType::Gold);
+            mana_vec.push(ManaType::Fortune);
         }
         for _ in 0..self.red {
             mana_vec.push(ManaType::Red);
@@ -75,9 +75,9 @@ impl ManaPool {
 
     pub fn add_mana(&mut self, mana: ManaType) {
         match mana {
-            ManaType::Purple => self.purple += 1,
+            ManaType::Influence => self.purple += 1,
             ManaType::Blue => self.blue += 1,
-            ManaType::Gold => self.gold += 1,
+            ManaType::Fortune => self.gold += 1,
             ManaType::Red => self.red += 1,
             ManaType::Green => self.green += 1,
             ManaType::Colorless => self.colorless += 1,

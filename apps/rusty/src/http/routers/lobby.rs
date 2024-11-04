@@ -15,6 +15,7 @@ use crate::error::AppError;
 use crate::http::controllers::lobby::ActionCardArgs;
 use crate::http::controllers::lobby::LobbyChatArgs;
 use crate::http::controllers::lobby::RespondCardSelection;
+use crate::http::controllers::lobby::RespondCardSelectionButton;
 use crate::http::controllers::lobby::RespondMandatoryAbility;
 use crate::http::controllers::lobby::RespondOptionalAbility;
 use crate::http::controllers::lobby::SelectDeckArgs;
@@ -50,6 +51,11 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         .mutation("respond.optional_ability", |t| {
             t(|ctx, args: RespondOptionalAbility| async move {
                 Ok(LobbyController::respond_optional_ability(ctx, args).await?)
+            })
+        })
+        .mutation("respond.card_selection_button", |t| {
+            t(|ctx, args: RespondCardSelectionButton| async move {
+                Ok(LobbyController::respond_card_selection_button(ctx, args).await?)
             })
         })
         .mutation("respond.card_selection", |t| {

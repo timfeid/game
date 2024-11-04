@@ -10,6 +10,7 @@
 		CardTitle
 	} from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
+	import { toast } from 'svelte-sonner';
 	import { saveLoginDetails } from '../../auth';
 	import { client } from '../../client';
 
@@ -21,15 +22,16 @@
 	async function login() {
 		loading = true;
 		try {
+			console.log('hello?');
 			const response = await client.mutation(['authentication.login', args]);
 			if (response.success && response.access_token && response.refresh_token) {
 				await saveLoginDetails(response);
 			}
+			goto('/');
 		} catch (e) {
-			console.log(e);
+			toast.error((e as Error).toString());
 		}
 		loading = false;
-		goto('/');
 	}
 </script>
 

@@ -41,7 +41,6 @@ use super::player::Player;
 #[derive(Debug, Default)]
 pub struct Deck {
     pub draw_pile: Vec<Arc<Mutex<Card>>>,
-    pub discard_pile: Vec<Arc<Mutex<Card>>>,
     pub graveyard: Vec<Arc<Mutex<Card>>>,
     pub in_game: Vec<Arc<Mutex<Card>>>,
     pub exiled: Vec<Arc<Mutex<Card>>>,
@@ -86,7 +85,6 @@ impl Deck {
 
         Self {
             draw_pile: cards.into_iter().map(|c| Arc::new(Mutex::new(c))).collect(),
-            discard_pile: vec![],
             graveyard: vec![],
             in_game: vec![],
             exiled: vec![],
@@ -98,9 +96,14 @@ impl Deck {
     pub async fn first_shuffle(&mut self) {
         let mut deck_has_lands = false;
         for card in self.draw_pile.iter() {
-            if let CardType::BasicLand(_) = card.lock().await.card_type {
-                deck_has_lands = true;
-                break;
+            match card.lock().await.card_type {
+                CardType::AdvancedMultiLand(_, _)
+                | CardType::AdvancedLand(_)
+                | CardType::BasicLand(_) => {
+                    deck_has_lands = true;
+                    break;
+                }
+                _ => (),
             }
         }
 

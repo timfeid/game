@@ -81,7 +81,7 @@ pub enum CardPhase {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
 pub enum Counter {
     PowerToughnessModifier(i16, i16),
-    Incremental(i16),
+    Incremental(String, i16),
 }
 
 pub struct CardBuilder {
@@ -252,6 +252,7 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub target: Option<FrontendTarget>,
     pub tapped: bool,
+    #[serde(skip_serializing, skip_deserializing)]
     pub stats: StatManager,
     #[serde(skip_serializing, skip_deserializing)]
     pub triggers: Vec<CardActionTrigger>,
@@ -309,6 +310,21 @@ impl Debug for Card {
 }
 
 impl Card {
+    pub fn get_incremental_counters(&self) -> HashMap<String, i16> {
+        let mut counter_sums = HashMap::new();
+
+        for counter in self.counters.values() {
+            if let Counter::Incremental(key, value) = counter {
+                *counter_sums.entry(key.clone()).or_insert(0) += value;
+                if counter_sums.get(key) == Some(&0) {
+                    counter_sums.remove(key);
+                }
+            }
+        }
+
+        counter_sums
+    }
+
     pub async fn abilities(
         &self,
         turn_phase: TurnPhase,
@@ -684,15 +700,7 @@ impl Card {
                 .await;
                 println!("applied power toughness counter!");
             }
-            Counter::Incremental(total) => {
-                card.lock()
-                    .await
-                    .modify_stat(StatType::Counter, total.clone());
-                // card.lock().await.add_stat(
-                //     Ulid::new().to_string(),
-                //     Stat::new(StatType::Counter, total.clone()),
-                // );
-            }
+            Counter::Incremental(name, total) => {}
         }
         id
     }
@@ -809,12 +817,15 @@ impl Card {
         target: Option<FrontendTarget>,
         trigger_id: String,
         game: &Arc<Mutex<Game>>,
-    ) -> (
-        Vec<Arc<dyn Action + Send + Sync>>,
-        bool,
-        Vec<ManaType>,
-        ActionType,
-    ) {
+    ) -> Result<
+        (
+            Vec<Arc<dyn Action + Send + Sync>>,
+            bool,
+            Vec<ManaType>,
+            ActionType,
+        ),
+        String,
+    > {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let mut requires_tap = false;
         let mut mana_requirements: Vec<ManaType> = vec![];
@@ -834,6 +845,56 @@ impl Card {
         let action_trigger = triggers.iter().find(|t| t.id == trigger_id);
         if let Some(action_trigger) = action_trigger {
             mana_requirements = action_trigger.mana_cost.clone();
+            match &action_trigger.required_target {
+                CardRequiredTarget::CardOfType(card_type, card_target_team, tap_required) => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
+                    )
+                    .await;
+
+                    if let Some(tap_required) = tap_required {
+                        let tapped = card.lock().await.tapped;
+                        if tapped && !*tap_required {
+                            return Err(format!("Card must be not tapped."));
+                        }
+                        if !tapped && *tap_required {
+                            return Err(format!("Card must be tapped."));
+                        }
+                    }
+
+                    if card.lock().await.card_type != *card_type {
+                        return Err(format!("Looking for card of type {:?}", card_type));
+                    }
+                }
+                CardRequiredTarget::BasicLand(card_target_team, _) => todo!(),
+                CardRequiredTarget::CreatureOfType(
+                    creature_type,
+                    card_target_team,
+                    tap_required,
+                ) => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
+                    )
+                    .await;
+
+                    if card.lock().await.creature_type != Some(creature_type.clone()) {
+                        return Err(format!("Looking for creature of type {:?}", creature_type));
+                    }
+                }
+                CardRequiredTarget::EnemyCardInCombat => todo!(),
+                CardRequiredTarget::Spell => todo!(),
+                CardRequiredTarget::MultipleCardsOfType(card_type, _) => todo!(),
+                CardRequiredTarget::CreatureWithPowerAndToughness(_, _, card_target_team) => {
+                    todo!()
+                }
+                _ => (),
+            }
 
             if action_trigger.meets_mana_requirements
                 && action_trigger.meets_requirements_except_mana
@@ -858,10 +919,10 @@ impl Card {
                     ability_id: Some(action_trigger.id.clone()),
                 }));
             } else {
-                println!("DOES NOT MEET REQUIREMENTS");
+                return Err("Does not meet requirements.".to_string());
             }
         } else {
-            println!("WHAT IS ABILITY WITH ID {:?}??", trigger_id)
+            return Err("Unable to find ability.".to_string());
         }
 
         let action_type = if is_mana_ability || !card_arc.lock().await.card_type.is_spell() {
@@ -872,7 +933,7 @@ impl Card {
             ActionType::ActivatedAbility
         };
 
-        (actions, requires_tap, mana_requirements, action_type)
+        Ok((actions, requires_tap, mana_requirements, action_type))
     }
 
     pub async fn collect_card_destroyed_actions(

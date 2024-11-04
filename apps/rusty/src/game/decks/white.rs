@@ -31,7 +31,7 @@ fn create_test_plains() -> Card {
     CardBuilder::new()
         .name("Plains")
         .description("")
-        .card_type(CardType::BasicLand(ManaType::Purple))
+        .card_type(CardType::BasicLand(ManaType::Influence))
         .add_action(
             ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
                 "Adds {W} white mana to your pool.".to_string(),
@@ -42,17 +42,17 @@ fn create_test_plains() -> Card {
             ))
             .action(GenerateManaAction {
                 mana_to_add: vec![
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
-                    ManaType::Purple,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
+                    ManaType::Influence,
                 ],
                 target: PlayerActionTarget::Owner,
             }),
@@ -197,7 +197,7 @@ pub fn create_ossification() -> Card {
                 })
             })
         )
-        .mana_cost(vec![ManaType::Colorless, ManaType::Purple])
+        .mana_cost(vec![ManaType::Colorless, ManaType::Influence])
         .card_type(CardType::Enchantment)
         .phase(CardPhase::Ready)
             .play_requirements(|game, source, _| {
@@ -254,7 +254,7 @@ pub fn create_skyclave_cleric() -> Card {
         .name("Skyclave Cleric")
         .description("When Skyclave Cleric enters, you gain 2 life.")
         .creature_of_type(1, 3, CreatureType::Angel)
-        .mana_cost(vec![ManaType::Colorless, ManaType::Purple])
+        .mana_cost(vec![ManaType::Colorless, ManaType::Influence])
         .add_action(
             ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield).closure_action(
                 |game, source, owner, _, _| {
@@ -551,7 +551,7 @@ fn create_lunarch_veteran() -> Card {
         .name("Lunarch Veteran")
         .creature_of_type(1, 1, CreatureType::Angel)
         .description("Whenever another creature you control enters, you gain 1 life.")
-        .mana_cost(vec![ManaType::Purple])
+        .mana_cost(vec![ManaType::Influence])
         .add_action(
             ActionBuilder::new(ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner))
                 .closure_action(|game, source, owner, target, ability_id| {
