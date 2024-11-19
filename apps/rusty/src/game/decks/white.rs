@@ -27,38 +27,38 @@ use ulid::Ulid;
 
 use super::duplicate_card;
 
-fn create_test_plains() -> Card {
-    CardBuilder::new()
-        .name("Plains")
-        .description("")
-        .card_type(CardType::BasicLand(ManaType::Influence))
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
-                "Adds {W} white mana to your pool.".to_string(),
-                vec![],
-                None,
-                true,
-                CardRequiredTarget::None,
-            ))
-            .action(GenerateManaAction {
-                mana_to_add: vec![
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                ],
-                target: PlayerActionTarget::Owner,
-            }),
-        )
-        .build()
-}
+// fn create_test_plains() -> Card {
+//     CardBuilder::new()
+//         .name("Plains")
+//         .description("")
+//         .card_type(CardType::BasicLand(ManaType::Influence))
+//         .add_action(
+//             ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+//                 "Adds {W} white mana to your pool.".to_string(),
+//                 vec![],
+//                 None,
+//                 true,
+//                 CardRequiredTarget::None,
+//             ))
+//             .action(GenerateManaAction {
+//                 mana_to_add: vec![
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                     ManaType::Influence,
+//                 ],
+//                 target: PlayerActionTarget::Owner,
+//             }),
+//         )
+//         .build()
+// }
 
 pub fn create_angels_blue_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
@@ -75,14 +75,14 @@ pub fn create_angels_blue_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_metropolis_reformer(), 2));
     // deck.append(&mut duplicate_card(create_resplendent_angel(), 4));
     // deck.append(&mut duplicate_card(create_righteous_valkyrie(), 4));
-    deck.append(&mut duplicate_card(create_ossification(), 2));
+    // deck.append(&mut duplicate_card(create_ossification(), 2));
     // deck.append(&mut duplicate_card(create_ajani_strength_of_the_pride(), 1));
     // deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
     // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
     // deck.append(&mut duplicate_card(create_island(), 10));
     // deck.append(&mut duplicate_card(create_plains(), 12));
 
-    deck.append(&mut duplicate_card(create_test_plains(), 1));
+    // deck.append(&mut duplicate_card(create_test_plains(), 1));
     // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
     // deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
     // deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
@@ -108,12 +108,12 @@ pub fn create_angels_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
     // deck.append(&mut duplicate_card(create_plains(), 22));
 
-    deck.append(&mut duplicate_card(create_test_plains(), 1));
+    // deck.append(&mut duplicate_card(create_test_plains(), 1));
     // deck.append(&mut duplicate_card(create_test_card(), 4));
     // deck.append(&mut duplicate_card(create_ossification(), 7));
     // deck.append(&mut duplicate_card(create_skyclave_apparition(), 4));
     deck.append(&mut duplicate_card(create_skyclave_cleric(), 2));
-    deck.append(&mut duplicate_card(create_ossification(), 4));
+    // deck.append(&mut duplicate_card(create_ossification(), 4));
     deck.append(&mut duplicate_card(create_counterspell(), 4));
     deck.append(&mut duplicate_card(create_lunarch_veteran(), 2));
     // deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
@@ -146,86 +146,6 @@ pub fn create_counterspell() -> Card {
                 .action(CounterSpellAction {}),
         )
         .card_type(CardType::Instant)
-        .build()
-}
-
-pub fn create_ossification() -> Card {
-    CardBuilder::new()
-        .name("Ossification")
-        .description("Enchant basic land you control\nWhen Ossification enters, exile target creature or planeswalker an opponent controls until Ossification leaves the battlefield.")
-        .play_target(CardRequiredTarget::BasicLand(CardTargetTeam::Owner, None))
-        .add_action(
-            ActionBuilder::new(
-                ActionTriggerType::CardEnteredBattlefield,
-            )
-            .closure_action(|game, source_card, owner, target, _| {
-                Box::pin(async move {
-
-                    let card = Game::card_from_frontend_target(&game, &target.unwrap()).await;
-                    source_card.lock().await.attached = Some(card);
-
-                    Game::execute_actions(game.clone(), vec![Arc::new(CardActionWrapper {
-                        ability_id: None,
-                        card: source_card.clone(),
-                        action: Arc::new(CastMandatoryAdditionalAbility {
-                            action_type: ActionType::None,
-                            mana: vec![],
-                            target: CardRequiredTarget::CardOfType(
-                                CardType::Creature,
-                                CardTargetTeam::Opponent,
-                                None
-                            ),
-                            description: "Exile target creature or planeswalker an opponent controls.".to_string(),
-                            ability: Arc::new(|_| -> Arc<dyn CardAction + Send + Sync> {
-                                Arc::new(AsyncClosureAction::new(|game, source_card, owner, target, _| {
-                                    Box::pin(async move {
-                                        source_card.lock().await.target = target.clone();
-                                        if let Some(target) = &target {
-                                            let card = Game::card_from_frontend_target(&game, &target).await;
-                                            Game::exile_card(&game, &card).await?;
-                                        }
-                                        Ok(())
-                                    })
-                                }))
-                            }),
-                        }),
-                        target: None,
-                    })]).await?;
-                    println!("hello!");
-
-                    Ok(())
-                })
-            })
-        )
-        .mana_cost(vec![ManaType::Colorless, ManaType::Influence])
-        .card_type(CardType::Enchantment)
-        .phase(CardPhase::Ready)
-            .play_requirements(|game, source, _| {
-                Box::pin(async move {
-                    if let Some(owner) = { source.lock().await.owner.clone() } {
-                        // Check if an opponent has a creature or planeswalker in play
-                        let owner_cloned = owner.clone();
-                        let opponent_has_creature_or_pw = game.lock().await
-                            .filter_cards_in_play(move |card_in_play| {
-                                if let Some(card_owner) = &card_in_play.owner {
-                                    !Arc::ptr_eq(&owner_cloned, card_owner) && card_in_play.card_type == CardType::Creature
-                                } else {
-                                    false
-                                }
-                            }).await.len() > 0;
-
-                        // Check if the owner has a basic land in play
-                        let has_basic_land = owner.lock().await.filter_cards_in_play(|card| {
-                            matches!(card.card_type, CardType::BasicLand(_))
-                        }).await.len() > 0;
-
-                        // Both conditions must be true
-                        has_basic_land && opponent_has_creature_or_pw
-                    } else {
-                        false
-                    }
-                })
-            })
         .build()
 }
 

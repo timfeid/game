@@ -77,11 +77,13 @@ impl Lobby {
                         Game::frontend_target_from_card(&self.game, attacker)
                             .await
                             .expect("hm")
+                            .1
                     },
                     blocker: {
                         Game::frontend_target_from_card(&self.game, blocker)
                             .await
                             .expect("hm")
+                            .1
                     },
                 })
             }
@@ -97,7 +99,7 @@ impl Lobby {
                 let player = &turn.current_player;
                 let player_id = turn.current_player.lock().await.name.clone();
                 let cards = player.lock().await.cards_in_play.clone();
-                for (index, card) in cards.iter().enumerate() {
+                for (index, (_, card)) in cards.iter().enumerate() {
                     for (attacker, target) in game.combat.attackers.iter() {
                         if Arc::ptr_eq(attacker, card) {
                             attacks.push(Attack {

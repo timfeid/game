@@ -25,80 +25,6 @@ use tokio::sync::Mutex;
 use ulid::Ulid;
 
 use super::duplicate_card;
-fn create_casino_royale() -> Card {
-    CardBuilder::new()
-        .name("Casino Royale")
-        .card_type(CardType::BasicLand(ManaType::Fortune))
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
-                "Adds 💰 to your pool.".to_string(),
-                vec![],
-                None,
-                true,
-                CardRequiredTarget::None,
-            ))
-            .action(GenerateManaAction {
-                mana_to_add: vec![ManaType::Fortune],
-                target: PlayerActionTarget::Owner,
-            }),
-        )
-        .build()
-}
-
-fn create_neon_district() -> Card {
-    CardBuilder::new()
-        .name("Neon District ")
-        .card_type(CardType::BasicLand(ManaType::Influence))
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
-                "Adds 🗣️ to your pool.".to_string(),
-                vec![],
-                None,
-                true,
-                CardRequiredTarget::None,
-            ))
-            .action(GenerateManaAction {
-                mana_to_add: vec![ManaType::Influence],
-                target: PlayerActionTarget::Owner,
-            }),
-        )
-        .build()
-}
-
-fn create_test_mana() -> Card {
-    CardBuilder::new()
-        .name("Cheating card")
-        .card_type(CardType::AdvancedMultiLand(
-            ManaType::Fortune,
-            ManaType::Influence,
-        ))
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
-                "Adds {W} white mana to your pool.".to_string(),
-                vec![],
-                None,
-                true,
-                CardRequiredTarget::None,
-            ))
-            .action(GenerateManaAction {
-                mana_to_add: vec![
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Influence,
-                    ManaType::Fortune,
-                    ManaType::Fortune,
-                    ManaType::Fortune,
-                    ManaType::Fortune,
-                    ManaType::Fortune,
-                ],
-                target: PlayerActionTarget::Owner,
-            }),
-        )
-        .build()
-}
 
 fn create_ace_of_spades() -> Card {
     CardBuilder::new()
@@ -306,66 +232,6 @@ fn create_craps_shooter() -> Card {
         .build()
 }
 
-fn create_high_roller() -> Card {
-    CardBuilder::new()
-        .name("High Roller")
-        .description("Whenever High Roller attacks, add a Luck counter to High Roller.")
-        .creature(1, 1)
-        .mana_cost(vec![ManaType::Colorless, ManaType::Influence, ManaType::Fortune])
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::CardAttacked)
-            .closure_action(|game, source, player, target, ability_id| {
-                Box::pin(async move {
-                    // Game::add(&game, &source, &player, StatType::LuckToken, 1).await;
-                    println!("adding counter");
-                    Card::add_counter(source, &game, Counter::Incremental("Luck".to_string(), 1)).await;
-
-                    Ok(())
-                })
-            })
-        )
-        .add_action(
-            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
-                "Remove 1 Luck couter: Flip a coin. If heads, High Roller gets +2/+0 until end of turn. If tails, High Roller gets -1/-0 until end of turn."
-                    .to_string(),
-                vec![],
-                None,
-                false,
-                CardRequiredTarget::None,
-            ))
-            .closure_action(|game, source, player, target, ability_id| {
-                Box::pin(async move {
-                    Card::add_counter(source.clone(), &game, Counter::Incremental("Luck".to_string(), -1)).await;
-                    let won = Game::slot_machine_minigame(&game, &player, 50, "High Roller gets +2/+0 until end of turn", "High Roller gets -1/-0 until end of turn.").await;
-                    tokio::spawn(async move {
-                        let amount = if won { 2 } else {-1};
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        Game::apply_effect(
-                            &game,
-                            StatModifierEffect::new(
-                                format!("counter-{}-{}-power", Ulid::new().to_string(), ability_id),
-                                EffectTarget::Card(source.clone()),
-                                StatType::Power,
-                                amount.clone(),
-                                ExpireContract::Turns(1),
-                                None,
-                            ),
-                        ).await;
-
-                    });
-
-                    Ok(())
-                })
-            })
-            .requirements(|game, source, owner, ability_id| {
-                Box::pin(async move {
-                    *source.lock().await.get_incremental_counters().get("Luck").unwrap_or(&0) > 0
-                 })
-            }),
-        )
-        .build()
-}
-
 pub fn create_vegas_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
 
@@ -374,10 +240,10 @@ pub fn create_vegas_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_mind_reader(), 4));
     // deck.append(&mut duplicate_card(create_high_roller(), 4));
     // deck.append(&mut duplicate_card(create_ace_of_spades(), 4));
-    deck.append(&mut duplicate_card(create_test_mana(), 4));
+    // deck.append(&mut duplicate_card(create_test_mana(), 4));
     deck.append(&mut duplicate_card(create_craps_shooter(), 4));
     deck.append(&mut duplicate_card(create_sic_bo(), 4));
-    deck.append(&mut duplicate_card(create_slot_machine(), 4));
+    // deck.append(&mut duplicate_card(create_slot_machine(), 4));
     // deck.append(&mut duplicate_card(create_dealers_enforcer(), 4));
     // deck.append(&mut duplicate_card(create_blackjack_dealer(), 4));
     // deck.append(&mut duplicate_card(create_poker_pro(), 4));

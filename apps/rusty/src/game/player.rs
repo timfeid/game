@@ -13,6 +13,7 @@ use std::{
 use axum::response::sse::KeepAlive;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use textwrap::fill;
 use tokio::{
     sync::Mutex,
@@ -27,7 +28,7 @@ use crate::{
 
 use super::{
     action::{
-        generate_mana::GenerateManaAction, Action, ActionTriggerType, Attachable,
+        generate_mana::GenerateManaAction, Action, ActionTriggerType, AddEnergyAction, Attachable,
         CardActionTrigger, CardActionWrapper, CombatAction, DrawCardAction, PhaseTarget,
         PlayCardAction, PlayerAction, PlayerActionTarget, PlayerActionTrigger, PlayerActionWrapper,
         ResetManaPoolAction, UntapAllAction,
@@ -61,6 +62,12 @@ impl Hash for PlayerKey {
     }
 }
 
+#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+pub enum CardPosition {
+    Frontline,
+    Backline,
+}
+
 #[derive(Deserialize, Serialize, Default)]
 pub struct Player {
     pub name: String,
@@ -72,7 +79,7 @@ pub struct Player {
     #[serde(skip_serializing, skip_deserializing)]
     pub cards_in_hand: Vec<Arc<Mutex<Card>>>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub cards_in_play: Vec<Arc<Mutex<Card>>>,
+    pub cards_in_play: Vec<(CardPosition, Arc<Mutex<Card>>)>,
     #[serde(skip_serializing, skip_deserializing)]
     pub triggers: Vec<PlayerActionTrigger>,
     #[serde(skip_serializing, skip_deserializing)]
@@ -122,24 +129,8 @@ impl Player {
                     Arc::new(UntapAllAction {}),
                 ),
                 PlayerActionTrigger::new(
-                    ActionTriggerType::PhaseStarted(
-                        vec![
-                            TurnPhase::Untap,
-                            TurnPhase::Upkeep,
-                            TurnPhase::Draw,
-                            TurnPhase::Main,
-                            TurnPhase::BeginningOfCombat,
-                            TurnPhase::DeclareAttackers,
-                            TurnPhase::DeclareBlockers,
-                            TurnPhase::CombatDamage,
-                            TurnPhase::EndOfCombat,
-                            TurnPhase::Main2,
-                            TurnPhase::End,
-                            TurnPhase::Cleanup,
-                        ],
-                        PhaseTarget::Owner,
-                    ),
-                    Arc::new(ResetManaPoolAction {}),
+                    ActionTriggerType::PhaseStarted(vec![TurnPhase::Main], PhaseTarget::Owner),
+                    Arc::new(AddEnergyAction {}),
                 ),
                 PlayerActionTrigger::new(
                     ActionTriggerType::PhaseStarted(vec![TurnPhase::Draw], PhaseTarget::Owner),
@@ -164,7 +155,8 @@ impl Player {
     pub fn set_deck(&mut self, card: Vec<Card>) {}
 
     pub async fn return_card_to_hand(&mut self, card_arc: &Arc<Mutex<Card>>) {
-        self.cards_in_play.retain(|c| !Arc::ptr_eq(c, card_arc));
+        self.cards_in_play
+            .retain(|(_, c)| !Arc::ptr_eq(c, card_arc));
         if let Some(card) = self.deck.fresh_ref(card_arc.lock().await.id.clone()) {
             self.cards_in_hand.push(card);
         }
@@ -361,9 +353,9 @@ impl Player {
     pub async fn advance_card_phases(&mut self) {
         println!("advancing card phases for {}", self.name);
         // Collect indices and card arcs to avoid holding locks across awaits
-        let card_arcs: Vec<Arc<Mutex<Card>>> = self.cards_in_play.clone();
+        let card_arcs = self.cards_in_play.clone();
 
-        for card_arc in card_arcs {
+        for (_, card_arc) in card_arcs {
             // Advance the card's phase
             let mut card = card_arc.lock().await;
 
@@ -396,7 +388,7 @@ impl Player {
         F: Fn(&Card) -> bool + 'static + Send + Sync,
     {
         let mut cards = vec![];
-        for card_arc in &self.cards_in_play {
+        for (_, card_arc) in &self.cards_in_play {
             let card = card_arc.lock().await;
             if (closure)(&card) {
                 cards.push(card_arc.clone());
@@ -516,7 +508,7 @@ impl Player {
     // }
     pub async fn creatures_of_type(&self, creature_type: CreatureType) -> Vec<Arc<Mutex<Card>>> {
         let mut cards: Vec<Arc<Mutex<Card>>> = vec![];
-        for card_arc in &self.cards_in_play {
+        for (_, card_arc) in &self.cards_in_play {
             let card = card_arc.lock().await;
             if card.creature_type == Some(creature_type) {
                 cards.push(Arc::clone(card_arc));
@@ -535,7 +527,7 @@ impl Player {
 
         let mut available_lands = vec![];
         {
-            for card_arc in &self.cards_in_play {
+            for (_, card_arc) in &self.cards_in_play {
                 // Attempt to acquire the lock with a 50ms timeout
                 match timeout(Duration::from_millis(50), card_arc.lock()).await {
                     Ok(card_guard) => {
@@ -593,7 +585,7 @@ impl Player {
         card_index: usize,
         // game: &mut Game,
     ) {
-        let card = &self.cards_in_play.remove(card_index);
+        let (_, card) = &self.cards_in_play.remove(card_index);
         self.deck.exile(card.lock().await.id.clone());
     }
 
@@ -602,7 +594,7 @@ impl Player {
         card_index: usize,
         // game: &mut Game,
     ) {
-        let card = &self.cards_in_play.remove(card_index);
+        let (_, card) = &self.cards_in_play.remove(card_index);
         self.deck.destroy(card.lock().await.id.clone());
     }
 
@@ -634,7 +626,12 @@ impl Player {
         player_info_width: usize,
     ) -> String {
         let rendered_cards_in_hand = self.render_card_list(&self.cards_in_hand, card_width).await;
-        let rendered_cards_in_play = self.render_card_list(&self.cards_in_play, card_width).await;
+        // let rendered_cards_in_play = self
+        //     .render_card_list(
+        //         &self.cards_in_play.iter().map(|(_, c)| c).collect(),
+        //         card_width,
+        //     )
+        //     .await;
         let rendered_player_info = self.render_player_info(card_height, player_info_width);
 
         let mut output = String::new();
@@ -658,11 +655,11 @@ impl Player {
             output.push_str(" P  ");
 
             // Render cards in play
-            if let Some(card_line) = rendered_cards_in_play.get(i) {
-                output.push_str(&format!("{}", card_line));
-            } else {
-                output.push_str(&format!("{:width$}", "none", width = card_width));
-            }
+            // if let Some(card_line) = rendered_cards_in_play.get(i) {
+            //     output.push_str(&format!("{}", card_line));
+            // } else {
+            //     output.push_str(&format!("{:width$}", "none", width = card_width));
+            // }
 
             output.push('\n');
         }
@@ -763,20 +760,6 @@ impl Player {
 
         // Check if the remaining mana is enough to cover the colorless mana cost
         remaining_mana >= required_mana.colorless
-    }
-
-    pub async fn can_play(&self, card: &Arc<Mutex<Card>>, is_my_turn: bool) -> bool {
-        let card = card.lock().await;
-
-        match card.card_type {
-            CardType::BasicLand(mana_type) => self.mana_pool.played_card == false && is_my_turn,
-            CardType::AdvancedLand(mana_type) => self.mana_pool.played_card == false && is_my_turn,
-            CardType::AdvancedMultiLand(mana_type, mana_type1) => {
-                self.mana_pool.played_card == false && is_my_turn
-            }
-            // TODO - others..
-            _ => true,
-        }
     }
 
     pub async fn pool_has_cost_for_card(&self, card: &Arc<Mutex<Card>>) -> bool {

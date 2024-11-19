@@ -25,7 +25,6 @@ use crate::game::card::Card;
 use crate::game::effects::EffectTarget;
 use crate::game::mana::ManaType;
 use crate::game::player::Player;
-use crate::game::slot_machine::{SlotMachine, SlotMachineResult};
 use crate::game::stat::{StatType, Stats};
 use crate::game::{
     ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
@@ -155,7 +154,6 @@ pub enum LobbyCommand {
     AskExecuteAbility(ExecuteAbility),
     MandatoryExecuteAbility(ExecuteAbility),
     ChooseFromSelection(CardSelectionDetails),
-    ShowSlotMachine(SlotMachineResult),
 }
 
 impl std::fmt::Debug for LobbyManager {
@@ -494,7 +492,7 @@ impl LobbyManager {
                     let player_spells = &player.player.lock().await.spells.clone();
                     let player_cards_in_hand = &player.player.lock().await.cards_in_hand.clone();
 
-                    for card in player_cards_in_play {
+                    for (_, card) in player_cards_in_play {
                         cards_in_play.push(
                             CardWithDetails::from_card_arc(game.clone(), Arc::clone(card)).await,
                         );

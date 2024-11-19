@@ -52,18 +52,18 @@ pub enum CardType {
     Instant,
     Sorcery,
     Artifact,
-    BasicLand(ManaType),
-    AdvancedLand(ManaType),
-    AdvancedMultiLand(ManaType, ManaType),
+    // BasicLand(ManaType),
+    // AdvancedLand(ManaType),
+    // AdvancedMultiLand(ManaType, ManaType),
     // Land(Vec<ManaType>),
 }
 
 impl CardType {
     pub fn is_spell(&self) -> bool {
         match self {
-            CardType::BasicLand(_) => false,
-            CardType::AdvancedLand(_) => false,
-            CardType::AdvancedMultiLand(_, _) => false,
+            // CardType::BasicLand(_) => false,
+            // CardType::AdvancedLand(_) => false,
+            // CardType::AdvancedMultiLand(_, _) => false,
             // CardType::Land(_) => false,
             _ => true,
         }

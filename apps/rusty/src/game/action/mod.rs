@@ -26,7 +26,7 @@ use super::{
     Ability, ActionType, CardWithDetails, FrontendCardTarget, FrontendTarget, Game,
 };
 use crate::{
-    game::stat::Stat,
+    game::{player::CardPosition, stat::Stat},
     lobby::manager::{CardSelectionDetails, LobbyCommand},
 };
 
@@ -176,10 +176,8 @@ impl CardAction for PlayCardAction {
             .unwrap()
             .current_player_id
             == player.lock().await.name.clone();
-        if !player.lock().await.can_play(&card, is_my_turn).await {
-            return Err(format!("Cannot play {} right now.", card.lock().await.name));
-        }
-        if let Ok(frontend_target) = Game::frontend_target_from_card(&game, &card).await {
+
+        if let Ok((_, frontend_target)) = Game::frontend_target_from_card(&game, &card).await {
             game.lock()
                 .await
                 .remove_from_frontend_target(&frontend_target)
@@ -200,7 +198,9 @@ impl CardAction for PlayCardAction {
             println!("not countered");
             {
                 let mut player = player.lock().await;
-                player.cards_in_play.push(Arc::clone(&card));
+                player
+                    .cards_in_play
+                    .push((CardPosition::Frontline, Arc::clone(&card)));
             }
 
             let actions = {
@@ -220,18 +220,18 @@ impl CardAction for PlayCardAction {
             {
                 let card_lock = card.lock().await;
                 match card_lock.card_type {
-                    CardType::AdvancedMultiLand(_, _) => {
-                        let mut player = player.lock().await;
-                        player.mana_pool.played_card = true;
-                    }
-                    CardType::AdvancedLand(_) => {
-                        let mut player = player.lock().await;
-                        player.mana_pool.played_card = true;
-                    }
-                    CardType::BasicLand(_) => {
-                        let mut player = player.lock().await;
-                        player.mana_pool.played_card = true;
-                    }
+                    // CardType::AdvancedMultiLand(_, _) => {
+                    //     let mut player = player.lock().await;
+                    //     player.mana_pool.played_card = true;
+                    // }
+                    // CardType::AdvancedLand(_) => {
+                    //     let mut player = player.lock().await;
+                    //     player.mana_pool.played_card = true;
+                    // }
+                    // CardType::BasicLand(_) => {
+                    //     let mut player = player.lock().await;
+                    //     player.mana_pool.played_card = true;
+                    // }
                     _ => (),
                 }
             }
@@ -624,6 +624,22 @@ pub struct ApplyStat {
 }
 
 #[derive(Debug, Clone)]
+pub struct AddEnergyAction {}
+
+#[async_trait]
+impl PlayerAction for AddEnergyAction {
+    async fn apply(
+        &self,
+        game: Arc<Mutex<Game>>,
+        player: Arc<Mutex<Player>>,
+    ) -> Result<(), String> {
+        player.lock().await.mana_pool.add_mana(ManaType::Colorless);
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ResetManaPoolAction {}
 
 #[async_trait]
@@ -651,7 +667,7 @@ impl PlayerAction for UntapAllAction {
     ) -> Result<(), String> {
         let cards_in_play = player.lock().await.cards_in_play.clone();
 
-        for card in cards_in_play.iter() {
+        for (_, card) in cards_in_play.iter() {
             card.lock().await.untap();
         }
         player.lock().await.mana_pool.played_card = false;
@@ -1161,7 +1177,7 @@ impl CardAction for ApplyEffectsToPlayerCreatureType {
             let owner = owner_arc.lock().await;
 
             // Iterate over the owner's in-play cards and apply the effect to matching card types
-            for card_in_play in owner.cards_in_play.clone() {
+            for (_, card_in_play) in owner.cards_in_play.clone() {
                 let card_type_matches = {
                     let card = card_in_play.lock().await;
                     card.creature_type == Some(self.creature_type)

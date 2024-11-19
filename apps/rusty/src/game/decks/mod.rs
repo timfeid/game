@@ -97,12 +97,12 @@ impl Deck {
         let mut deck_has_lands = false;
         for card in self.draw_pile.iter() {
             match card.lock().await.card_type {
-                CardType::AdvancedMultiLand(_, _)
-                | CardType::AdvancedLand(_)
-                | CardType::BasicLand(_) => {
-                    deck_has_lands = true;
-                    break;
-                }
+                // CardType::AdvancedMultiLand(_, _)
+                // | CardType::AdvancedLand(_)
+                // | CardType::BasicLand(_) => {
+                //     deck_has_lands = true;
+                //     break;
+                // }
                 _ => (),
             }
         }
@@ -114,11 +114,11 @@ impl Deck {
                 println!("Shuffled deck");
                 for card in self.draw_pile[self.draw_pile.len() - 7..].iter() {
                     match card.lock().await.card_type {
-                        CardType::BasicLand(_) => {
-                            has_land = true;
-                        }
-                        CardType::AdvancedLand(_) => has_land = true,
-                        CardType::AdvancedMultiLand(_, _) => has_land = true,
+                        // CardType::BasicLand(_) => {
+                        //     has_land = true;
+                        // }
+                        // CardType::AdvancedLand(_) => has_land = true,
+                        // CardType::AdvancedMultiLand(_, _) => has_land = true,
                         _ => {}
                     }
                 }
