@@ -23,7 +23,9 @@ export type Procedures = {
         { key: "lobby.subscribe", input: [string, string], result: LobbyCommand }
 };
 
-export type LobbyCommand = { Updated: LobbyData } | { Messages: string[] } | { DebugMessage: string } | { TurnMessages: LobbyTurnMessage } | { AskExecuteAbility: ExecuteAbility } | { MandatoryExecuteAbility: ExecuteAbility } | { ChooseFromSelection: CardSelectionDetails } | { ShowSlotMachine: SlotMachineResult }
+export type FrontendPileName = "Hand" | "Play" | "Spell" | "Deck" | "Exiled" | "Graveyard"
+
+export type PriorityQueue = { player_id: string; time_left: number }
 
 export type Counter = { PowerToughnessModifier: [number, number] } | { Incremental: [string, number] }
 
@@ -33,39 +35,43 @@ export type ManaType = "Influence" | "Blue" | "Fortune" | "Red" | "Green" | "Col
 
 export type TurnPhase = "Untap" | "Upkeep" | "Draw" | "Main" | "BeginningOfCombat" | "DeclareAttackers" | "DeclareBlockers" | "CombatDamage" | "EndOfCombat" | "Main2" | "End" | "Cleanup"
 
-export type FrontendCardTarget = { player_id: string; pile: FrontendPileName; card_index: number }
+export type DeckSelector = "Vegas"
 
 export type LobbyChatArgs = { lobby_id: string; text: string }
 
-export type CardSelectionDetails = { player_id: string; cards: CardWithDetails[]; selection_required: boolean; message: string; buttons: ModalButton[] }
+export type CardTargetTeam = "Owner" | "Opponent" | "Any"
 
-export type SlotMachineResult = { reels: string[]; won: boolean; symbols_used: string[]; winning_combinations: string[][]; result: string }
+export type CardRequiredTarget = "None" | "OwnedCard" | "AnyPlayer" | "AnyCard" | "EnemyCard" | "EnemyPlayer" | "EnemyCardOrPlayer" | "ChosenBattlefield" | "FrontlineBattlefield" | "BacklineBattlefield" | { CardOfType: [CardType, CardTargetTeam, boolean | null] } | { BasicLand: [CardTargetTeam, boolean | null] } | { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } | "EnemyCardInCombat" | "Spell" | { MultipleCardsOfType: [CardType, number] } | { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] }
 
 export type ActionCardArgs = { trigger_id: string; code: string; card: FrontendCardTarget; target: FrontendTarget | null }
 
-export type CardRequiredTarget = "None" | "OwnedCard" | "AnyPlayer" | "AnyCard" | "EnemyCard" | "EnemyPlayer" | "EnemyCardOrPlayer" | { CardOfType: [CardType, CardTargetTeam, boolean | null] } | { BasicLand: [CardTargetTeam, boolean | null] } | { CreatureOfType: [CreatureType, CardTargetTeam, boolean | null] } | "EnemyCardInCombat" | "Spell" | { MultipleCardsOfType: [CardType, number] } | { CreatureWithPowerAndToughness: [number, number, CardTargetTeam] }
+export type AbilityDetails = { mana_cost: ManaType[]; required_target: CardRequiredTarget; description: string; show: boolean; id: string; meets_requirements_except_mana: boolean; meets_mana_requirements: boolean; can_pay_mana: boolean; owner_player_id: string | null; tap_required: boolean }
 
-export type PlayerStatus = "Spectator" | "Ready" | "InGame"
+export type ExecuteAbility = { card: CardWithDetails; details: AbilityDetails; player_id: string }
 
-export type GameStatus = "NeedsPlayers" | "InGame" | { WaitingForStart: number }
+export type Attack = { attacker: FrontendCardTarget; target: FrontendTarget }
 
-export type PlayerState = { public_info: PublicPlayerInfo; hand: CardWithDetails[]; discard_pile: CardWithDetails[]; status: PlayerStatus; is_leader: boolean; player_index: number; priority_queue: PriorityQueue | null; deck: DeckSelector; sub: string }
+export type PublicGameInfo = { current_turn: Turn | null; priority_queue: PriorityQueue | null; attacks: Attack[]; blocks: Block[] }
 
-export type PhaseTarget = "Owner" | "Opponent" | "Any"
+export type ModalButton = { id: string; text: string }
+
+export type CardWithDetails = { position: CardPosition | null; card: Card; frontend_target: FrontendCardTarget; abilities: AbilityDetails[]; attached_to: FrontendCardTarget | null; stats: { [key: StatType]: number }; incremental_counters: { [key: string]: number } }
 
 export type RespondOptionalAbility = { code: string; target: FrontendTarget | null; ability_id: string; response: boolean }
 
-export type GameState = { players: { [key: string]: PlayerState }; public_info: PublicGameInfo; status: GameStatus; code: string }
-
-export type AbilityDetails = { mana_cost: ManaType[]; required_target: CardRequiredTarget; description: string; show: boolean; id: string; meets_requirements_except_mana: boolean; meets_mana_requirements: boolean; can_pay_mana: boolean; owner_player_id: string | null; tap_required: boolean }
-
-export type LobbyTurnMessage = { messages: string[] }
+export type PlayerState = { public_info: PublicPlayerInfo; hand: CardWithDetails[]; discard_pile: CardWithDetails[]; status: PlayerStatus; is_leader: boolean; player_index: number; priority_queue: PriorityQueue | null; deck: DeckSelector; sub: string }
 
 export type DeckDetails = { cards: CardWithCount[] }
 
 export type RespondCardSelection = { code: string; target: FrontendTarget | null }
 
+export type CardSelectionDetails = { player_id: string; cards: CardWithDetails[]; selection_required: boolean; message: string; buttons: ModalButton[] }
+
+export type FrontendTarget = { Card: FrontendCardTarget } | { Player: string } | "FrontlineBattlefield" | "BacklineBattlefield"
+
 export type Turn = { current_player_index: number; current_player_id: string; phase: TurnPhase; turn_number: number }
+
+export type PlayerStatus = "Spectator" | "Ready" | "InGame"
 
 export type CreatureType = "None" | "Angel" | "Elf"
 
@@ -73,46 +79,40 @@ export type LobbyChat = { user_id: string; message: string }
 
 export type ManaPool = { purple: number; blue: number; gold: number; red: number; green: number; colorless: number; played_card: boolean }
 
-export type Block = { attacker: FrontendCardTarget; blocker: FrontendCardTarget }
-
 export type LobbyData = { join_code: string; chat: LobbyChat[]; game_state: GameState }
-
-export type ModalButton = { id: string; text: string }
-
-export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number; luck_tokens: number }
-
-export type DeckSelector = "Vegas"
 
 export type Card = { play_restrictions: [TurnPhase[], PhaseTarget] | null; creature_type: CreatureType | null; name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; cost: ManaType[]; is_countered: boolean; id: string; counters: { [key: string]: Counter }; play_target: CardRequiredTarget }
 
 export type StatType = "Health" | "Power" | "LuckToken" | "Toughness" | "Trample" | "Lifelink" | "Flying" | "Reach" | "Regenerate" | "Deathtouch" | "Vigilance" | "Haist"
 
-export type PriorityQueue = { player_id: string; time_left: number }
-
 export type RespondCardSelectionButton = { code: string; button_id: string }
 
 export type RespondMandatoryAbility = { code: string; target: FrontendTarget | null; ability_id: string }
 
-export type FrontendTarget = { Card: FrontendCardTarget } | { Player: string }
+export type CardPosition = "Frontline" | "Backline"
 
 export type CardWithCount = { card: CardWithDetails; count: number }
 
 export type LoginArgs = { username: string; password: string }
 
-export type CardType = "Creature" | "Planeswalker" | "Enchantment" | "Instant" | "Sorcery" | "Artifact" | { BasicLand: ManaType } | { AdvancedLand: ManaType } | { AdvancedMultiLand: [ManaType, ManaType] }
-
-export type CardWithDetails = { card: Card; frontend_target: FrontendCardTarget; abilities: AbilityDetails[]; attached_to: FrontendCardTarget | null; stats: { [key: StatType]: number }; incremental_counters: { [key: string]: number } }
+export type CardType = "Creature" | "Planeswalker" | "Enchantment" | "Instant" | "Sorcery" | "Artifact"
 
 export type AuthResponse = { access_token: string | null; refresh_token: string | null; success: boolean }
 
-export type FrontendPileName = "Hand" | "Play" | "Spell" | "Deck" | "Exiled" | "Graveyard"
+export type GameStatus = "NeedsPlayers" | "InGame" | { WaitingForStart: number }
 
-export type ExecuteAbility = { card: CardWithDetails; details: AbilityDetails; player_id: string }
+export type Block = { attacker: FrontendCardTarget; blocker: FrontendCardTarget }
 
-export type PublicGameInfo = { current_turn: Turn | null; priority_queue: PriorityQueue | null; attacks: Attack[]; blocks: Block[] }
+export type GameState = { players: { [key: string]: PlayerState }; public_info: PublicGameInfo; status: GameStatus; code: string }
+
+export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number; luck_tokens: number }
+
+export type PhaseTarget = "Owner" | "Opponent" | "Any"
+
+export type LobbyCommand = { Updated: LobbyData } | { Messages: string[] } | { DebugMessage: string } | { TurnMessages: LobbyTurnMessage } | { AskExecuteAbility: ExecuteAbility } | { MandatoryExecuteAbility: ExecuteAbility } | { ChooseFromSelection: CardSelectionDetails }
+
+export type FrontendCardTarget = { player_id: string; pile: FrontendPileName; card_index: number }
+
+export type LobbyTurnMessage = { messages: string[] }
 
 export type SelectDeckArgs = { code: string; deck: DeckSelector }
-
-export type Attack = { attacker: FrontendCardTarget; target: FrontendTarget }
-
-export type CardTargetTeam = "Owner" | "Opponent" | "Any"

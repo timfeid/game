@@ -213,10 +213,10 @@
 
 <button
 	onclick={actionCard}
-	class:rotate-90={card.tapped}
+	class:opacity-50={card.tapped}
 	class:scale-75={card.tapped}
 	class:has-attachments={children}
-	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
+	class="flex flex-col text-xs card relative w-[215px] h-[215px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
 	data-player-id={cardWithDetails.frontend_target.player_id}

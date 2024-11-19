@@ -161,7 +161,7 @@ fn create_sic_bo() -> Card {
         .name("Sic Bo")
         .description("Look at the top three cards of your library. You may rearrange them in any order or put them on the bottom of your library.")
         .card_type(CardType::Instant)
-        .mana_cost(vec![ManaType::Influence, ManaType::Influence])
+        // .mana_cost(vec![ManaType::Influence, ManaType::Influence])
         .add_action(
             ActionBuilder::new(ActionTriggerType::CardEnteredBattlefield)
             .closure_action(|game, source, player, target, ability_id| {
@@ -190,7 +190,8 @@ fn create_craps_shooter() -> Card {
     CardBuilder::new()
         .name("Craps Shooter")
         .creature(1, 1)
-        .mana_cost(vec![ManaType::Colorless, ManaType::Fortune])
+        // .mana_cost(vec![ManaType::Colorless, ManaType::Fortune])
+        .play_target(CardRequiredTarget::ChosenBattlefield)
         .add_action(
             ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
                 "Reveal the top two cards of your library. If both cards share the same card type, put them into your hand. Otherwise, put them into your graveyard."

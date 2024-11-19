@@ -227,6 +227,8 @@ pub enum FrontendPileName {
 pub enum FrontendTarget {
     Card(FrontendCardTarget),
     Player(String),
+    FrontlineBattlefield,
+    BacklineBattlefield,
 }
 
 #[derive(Type, Deserialize, Serialize, Debug, Clone, PartialEq)]
@@ -820,6 +822,7 @@ impl Game {
                     .expect("Unable to find player")
                     .1,
             ),
+            _ => panic!("unable to target that"),
         }
     }
 
@@ -1364,14 +1367,14 @@ impl Game {
                 game.lock().await.event_stack.append(&mut actions);
 
                 // Start the priority loop if it's not already running
-                if game.lock().await.current_priority_player.is_none() {
-                    let game_cloned = game.clone();
-                    let player_cloned = player.clone();
-                    tokio::spawn(async move {
-                        Game::priority_loop(game_cloned.clone(), &player_cloned).await;
-                        Game::resolve_stack(&game_cloned, true).await.ok();
-                    });
-                }
+                // if game.lock().await.current_priority_player.is_none() {
+                //     let game_cloned = game.clone();
+                //     let player_cloned = player.clone();
+                //     tokio::spawn(async move {
+                //         Game::priority_loop(game_cloned.clone(), &player_cloned).await;
+                Game::resolve_stack(game, true).await.ok();
+                //     });
+                // }
             }
             _ => {
                 // For other action types, execute immediately
@@ -1999,7 +2002,6 @@ impl Game {
             sleep(sleep_duration).await;
         }
     }
-
     pub fn performed_action(&self) -> ActionType {
         if let Some((_, _, action)) = &self.current_priority_player {
             return action.clone();

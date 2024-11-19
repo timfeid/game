@@ -55,13 +55,11 @@
 			{/if}
 		</div>
 	</div>
-	<div class="w-full flex-grow !px-3 pt-6">
-		<div class="grid grid-cols-2 gap-3">
-			{#each Object.keys(game_state.players) as key}
-				{@const player = game_state.players[key]}
-				<Player code={join_code} game={game_state} {player} playerName={key} />
-			{/each}
-		</div>
+	<div class="w-full flex flex-col min-h-full h-full flex-grow !px-3 pt-6">
+		{#each Object.keys(game_state.players) as key}
+			{@const player = game_state.players[key]}
+			<Player code={join_code} game={game_state} {player} playerName={key} />
+		{/each}
 	</div>
 
 	<div class="z-40 sticky bottom-0 left-0 right-0">

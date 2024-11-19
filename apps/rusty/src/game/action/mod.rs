@@ -197,10 +197,12 @@ impl CardAction for PlayCardAction {
         } else {
             println!("not countered");
             {
+                let mut position = CardPosition::Backline;
+                if let Some(FrontendTarget::FrontlineBattlefield) = target {
+                    position = CardPosition::Frontline;
+                }
                 let mut player = player.lock().await;
-                player
-                    .cards_in_play
-                    .push((CardPosition::Frontline, Arc::clone(&card)));
+                player.cards_in_play.push((position, Arc::clone(&card)));
             }
 
             let actions = {
@@ -436,6 +438,9 @@ pub enum CardRequiredTarget {
     EnemyCard,
     EnemyPlayer,
     EnemyCardOrPlayer,
+    ChosenBattlefield,
+    FrontlineBattlefield,
+    BacklineBattlefield,
     CardOfType(CardType, CardTargetTeam, Option<bool>),
     BasicLand(CardTargetTeam, Option<bool>),
     CreatureOfType(CreatureType, CardTargetTeam, Option<bool>),
@@ -785,7 +790,7 @@ impl CardAction for DestroyTargetCAction {
         ability_id: Option<String>,
     ) -> Result<(), String> {
         match &target {
-            None => Err(format!("Nothing to destroy")),
+            _ => Err(format!("Nothing to destroy")),
             Some(FrontendTarget::Card(frontend_target)) => {
                 let target_card =
                     Game::card_from_frontend_card_target(&game, frontend_target).await;
@@ -814,7 +819,7 @@ impl CardAction for DeclareBlockerAction {
     ) -> Result<(), String> {
         println!("declare blocker??????");
         match &target {
-            None => todo!(),
+            _ => todo!(),
             Some(FrontendTarget::Player(arc)) => todo!(),
             Some(FrontendTarget::Card(frontend_target)) => {
                 let arc = Game::card_from_frontend_card_target(&game, frontend_target).await;
