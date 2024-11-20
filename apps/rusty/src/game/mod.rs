@@ -198,7 +198,6 @@ impl PlayerState {
                 hand_size: 0,
                 mana_pool: ManaPool::new(),
                 health: 20,
-                luck_tokens: 0,
             },
             deck: DeckSelector::Vegas,
             sub,
@@ -265,7 +264,6 @@ pub struct PublicPlayerInfo {
     pub spells: Vec<CardWithDetails>,
     pub mana_pool: ManaPool,
     pub health: i16,
-    pub luck_tokens: i16,
 }
 
 pub enum PriorityActionResult {
