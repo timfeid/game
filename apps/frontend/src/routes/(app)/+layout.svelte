@@ -3,7 +3,7 @@
 	import Menu from '$lib/components/ui/page/menu.svelte';
 </script>
 
-<div class="fixed z-[100] top-2 right-2">
+<div class="fixed z-[100] top-2 left-2">
 	<Menu />
 </div>
 

@@ -14,7 +14,7 @@
 	</div>
 {/if}
 {#if turnMessage}
-	<div
+	<!-- <div
 		class="relative text-center text-xs w-full flex flex-col justify-end h-16 pb-6 overflow-hidden"
 	>
 		{#each turnMessage.messages as message, index}
@@ -28,11 +28,10 @@
 				{message}
 			</div>
 		{/each}
-		<!-- Overlay for the fade effect -->
 		<div
 			class=" test absolute top-0 left-0 w-full h-16 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
 		></div>
-	</div>
+	</div> -->
 {/if}
 
 <style lang="css">

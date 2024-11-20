@@ -26,7 +26,9 @@ async fn create_pool() -> Arc<Pool<Postgres>> {
 }
 
 async fn create_lobby_manager() -> Arc<LobbyManager> {
-    let manager = LobbyManager::new("redis://127.0.0.1/").await.unwrap();
+    let manager = LobbyManager::new(&dotenv::var("REDIS_URL").unwrap())
+        .await
+        .unwrap();
     Arc::new(manager)
 }
 

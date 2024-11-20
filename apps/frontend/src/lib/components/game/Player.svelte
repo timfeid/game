@@ -93,9 +93,9 @@
 			</CardTitle>
 		</CardHeader>
 		<CardContent
-			class="flex flex-col {player.player_index === 0 ? '' : 'flex-col-reverse'} flex-grow"
+			class="flex flex-col {player.player_index !== 0 ? '' : 'flex-col-reverse'} flex-grow"
 		>
-			<div class="py-4 flex flex-wrap gap-2 flex-grow">
+			<div class="py-8 flex flex-wrap justify-center gap-2 flex-grow">
 				{#each player.public_info.cards_in_play as card, i}
 					{#if card.position === 'Frontline' && card.attached_to === null}
 						<PlayingCardWithAttachments {game} cardWithDetails={card} />
@@ -104,18 +104,19 @@
 				{#if showBattlefieldTargets}
 					<button
 						onclick={() => chooseBattlefield('FrontlineBattlefield')}
-						class="flex flex-col text-xs card relative w-[215px] h-[215px] transition duration-300 font-serif justify-center items-center border rounded"
+						class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif justify-center items-center border rounded"
 						>frontline</button
 					>
 				{/if}
 			</div>
 			<div
-				class="py-4 flex flex-wrap gap-2 flex-grow relative {player.player_index === 0
+				class="py-8 bg-gray-300 dark:bg-gray-800 flex flex-wrap gap-2 flex-grow relative justify-center {player.player_index !==
+				0
 					? ' border-t'
 					: ' border-b'}"
 			>
 				<div
-					class="absolute bg-background px-4 left-1/2 -translate-x-1/2 {player.player_index === 0
+					class="absolute bg-gray-300 dark:bg-gray-800 px-4 left-1/2 -translate-x-1/2 {player.player_index !== 0
 						? 'top-0 -translate-y-1/2'
 						: 'bottom-0 translate-y-1/2'}"
 				>
@@ -129,7 +130,7 @@
 				{#if showBattlefieldTargets}
 					<button
 						onclick={() => chooseBattlefield('BacklineBattlefield')}
-						class="flex flex-col text-xs card relative w-[215px] h-[215px] transition duration-300 font-serif justify-center items-center border rounded"
+						class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif justify-center items-center border rounded"
 						>backline</button
 					>
 				{/if}

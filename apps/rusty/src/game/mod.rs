@@ -2157,7 +2157,7 @@ impl Game {
             //         as Box<dyn CardStatChangeListener + Send + Sync>));
 
             player.deck.first_shuffle().await;
-            for _ in 0..7 {
+            for _ in 0..5 {
                 player.draw_card();
             }
         }
