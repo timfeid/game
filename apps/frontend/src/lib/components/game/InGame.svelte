@@ -35,29 +35,29 @@
 		return '';
 	}
 	let battlefieldStyle = '';
-	let battlefield: HTMLDivElement
-	function updatePerspective(e: MouseEvent) {
-	const contentHeight = battlefield?.scrollHeight || 0; // Get content height
-	const perspective = contentHeight * 2; // Adjust multiplier as needed
+	let battlefield: HTMLDivElement;
+	// function updatePerspective(e: MouseEvent) {
+	// 	const contentHeight = battlefield?.scrollHeight || 0; // Get content height
+	// 	const perspective = contentHeight * 2; // Adjust multiplier as needed
 
-	const screenHeight = window.innerHeight;
+	// 	const screenHeight = window.innerHeight;
 
-	const y = e.clientY / screenHeight; // Normalize cursor Y position to [0, 1]
+	// 	const y = e.clientY / screenHeight; // Normalize cursor Y position to [0, 1]
 
-	// Translate battlefield along Y and apply consistent rotation
-	const translateY = y * contentHeight * .25; // Adjust the depth effect
-	const rotateX = 40; // Fixed tilt
+	// 	// Translate battlefield along Y and apply consistent rotation
+	// 	const translateY = y * contentHeight * 0.25; // Adjust the depth effect
+	// 	const rotateX = 40; // Fixed tilt
 
-	battlefieldStyle = `
-		transform: perspective(${perspective}px) translateY(${-translateY}px) rotateX(${rotateX}deg);
-		transform-origin: center center;
-		max-height: 100vh;
-		overflow: visible;
-	`;
-}
+	// 	battlefieldStyle = `
+	// 	transform: perspective(${perspective}px) translateY(${-translateY}px) rotateX(${rotateX}deg);
+	// 	transform-origin: center center;
+	// 	max-height: 100vh;
+	// 	overflow: visible;
+	// `;
+	// }
 </script>
 
-<svelte:document onmousemove={updatePerspective} />
+<!-- <svelte:document onmousemove={updatePerspective} /> -->
 
 <AttackerLines game={game_state} />
 
@@ -69,7 +69,7 @@
 				<PriorityQueueNotification {turnMessage} game={game_state}></PriorityQueueNotification>
 				<!-- </div> -->
 				{#if game_state.public_info.current_turn}
-					<div class="text-center py-4 text-2xl uppercase dark:gray-950 font-serif text-white">
+					<div class="text-center py-4 text-2xl uppercase dark:gray-950 font-serif dark:text-white">
 						Turn #{game_state.public_info.current_turn.turn_number},
 						{currentPlayer(game_state.public_info)}'s
 						{game_state.public_info.current_turn.phase}
@@ -79,9 +79,9 @@
 		</div>
 		<div class="w-full flex min-h-full h-full max-h-full flex-grow !px-3 pt-6 overflow-hidden">
 			<div class="flex flex-col flex-grow" bind:this={battlefield} style="  {battlefieldStyle}">
-				{#each Object.keys(game_state.players) as key}
+				{#each Object.keys(game_state.players) as key, index}
 					{@const player = game_state.players[key]}
-					<Player code={join_code} game={game_state} {player} playerName={key} />
+					<Player {index} code={join_code} game={game_state} {player} playerName={key} />
 				{/each}
 			</div>
 		</div>

@@ -819,8 +819,6 @@ impl CardAction for DeclareBlockerAction {
     ) -> Result<(), String> {
         println!("declare blocker??????");
         match &target {
-            _ => todo!(),
-            Some(FrontendTarget::Player(arc)) => todo!(),
             Some(FrontendTarget::Card(frontend_target)) => {
                 let arc = Game::card_from_frontend_card_target(&game, frontend_target).await;
                 game.lock()
@@ -829,6 +827,7 @@ impl CardAction for DeclareBlockerAction {
                     .declare_blocker(Arc::clone(&card), Arc::clone(&arc))
                     .await?;
             }
+            _ => {}
         };
 
         Ok(())

@@ -214,7 +214,6 @@
 <button
 	onclick={actionCard}
 	class:opacity-50={card.tapped}
-	class:scale-75={card.tapped}
 	class:has-attachments={children}
 	class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}

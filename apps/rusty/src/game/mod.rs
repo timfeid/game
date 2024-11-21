@@ -1871,7 +1871,7 @@ impl Game {
                     println!("Player {}'s priority turn has started.", player.name);
                 }
 
-                let initial_time_limit = if i == 0 { 0 } else { 3 };
+                let initial_time_limit = if i == 0 { 10 } else { 3 };
 
                 {
                     let mut game = game_arc.lock().await;
@@ -2132,8 +2132,6 @@ impl Game {
             .unwrap()
             .current_player
             .clone();
-        Game::priority_loop(Arc::clone(game), &owner).await;
-        Game::resolve_stack(game, false).await.ok();
         Game::priority_loop(Arc::clone(game), &owner).await;
         Game::resolve_stack(game, true).await.ok();
     }

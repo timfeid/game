@@ -62,7 +62,7 @@ impl Hash for PlayerKey {
     }
 }
 
-#[derive(Type, Deserialize, Serialize, Debug, Clone)]
+#[derive(Type, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum CardPosition {
     Frontline,
     Backline,

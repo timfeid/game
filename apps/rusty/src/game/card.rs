@@ -27,6 +27,7 @@ use super::action::{
 
 use super::effects::{EffectID, ExpireContract, StatModifierEffect};
 use super::mana::ManaType;
+use super::player::CardPosition;
 use super::turn::Turn;
 use super::{
     action::Action,
@@ -222,7 +223,17 @@ impl CardBuilder {
                 false,
                 CardRequiredTarget::EnemyCardInCombat,
             ))
-            .action(DeclareBlockerAction {}),
+            .action(DeclareBlockerAction {})
+            .requirements(|game, source, owner, ability_id| {
+                Box::pin(async move {
+                    if let Ok((Some(position), target)) =
+                        Game::frontend_target_from_card(&game, &source).await
+                    {
+                        return position == CardPosition::Frontline;
+                    }
+                    false
+                })
+            }),
         );
 
         self
@@ -887,7 +898,26 @@ impl Card {
                         return Err(format!("Looking for creature of type {:?}", creature_type));
                     }
                 }
-                CardRequiredTarget::EnemyCardInCombat => todo!(),
+                CardRequiredTarget::EnemyCardInCombat => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
+                    )
+                    .await;
+                    if game
+                        .lock()
+                        .await
+                        .combat
+                        .attackers
+                        .iter()
+                        .find(|(find_card, _)| Arc::ptr_eq(&card, find_card))
+                        .is_none()
+                    {
+                        return Err(format!("Looking for a creature in combat"));
+                    }
+                }
                 CardRequiredTarget::Spell => todo!(),
                 CardRequiredTarget::MultipleCardsOfType(card_type, _) => todo!(),
                 CardRequiredTarget::CreatureWithPowerAndToughness(_, _, card_target_team) => {

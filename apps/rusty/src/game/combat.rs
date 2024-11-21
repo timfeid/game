@@ -138,6 +138,11 @@ impl Combat {
                     } else {
                         destroyed_cards.push(Arc::clone(blocking_card_arc));
                     }
+                } else {
+                    blocker_card.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -attacker_damage),
+                    );
                 }
             }
 
@@ -170,6 +175,11 @@ impl Combat {
                     } else {
                         destroyed_cards.push(Arc::clone(attacker_card_arc));
                     }
+                } else {
+                    attacker_card.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -blocker_damage),
+                    );
                 }
             }
         }
@@ -275,11 +285,14 @@ impl Combat {
                     card.lock().await.name
                 );
 
-                let damage_taken = card.lock().await.damage_taken;
-                if damage_taken >= toughness {
+                if damage >= toughness {
                     println!("Card {} is destroyed!", card.lock().await.name);
                     Some(Arc::clone(card))
                 } else {
+                    card.lock().await.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -damage),
+                    );
                     None
                 }
             }

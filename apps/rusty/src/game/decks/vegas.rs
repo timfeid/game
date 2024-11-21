@@ -189,7 +189,7 @@ fn create_sic_bo() -> Card {
 fn create_craps_shooter() -> Card {
     CardBuilder::new()
         .name("Craps Shooter")
-        .creature(1, 1)
+        .creature(1, 8)
         // .mana_cost(vec![ManaType::Colorless, ManaType::Fortune])
         .play_target(CardRequiredTarget::ChosenBattlefield)
         .add_action(
@@ -242,8 +242,8 @@ pub fn create_vegas_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_high_roller(), 4));
     // deck.append(&mut duplicate_card(create_ace_of_spades(), 4));
     // deck.append(&mut duplicate_card(create_test_mana(), 4));
-    deck.append(&mut duplicate_card(create_craps_shooter(), 4));
-    deck.append(&mut duplicate_card(create_sic_bo(), 4));
+    deck.append(&mut duplicate_card(create_craps_shooter(), 8));
+    // deck.append(&mut duplicate_card(create_sic_bo(), 4));
     // deck.append(&mut duplicate_card(create_slot_machine(), 4));
     // deck.append(&mut duplicate_card(create_dealers_enforcer(), 4));
     // deck.append(&mut duplicate_card(create_blackjack_dealer(), 4));
