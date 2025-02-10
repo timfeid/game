@@ -108,7 +108,7 @@ pub fn create_angels_deck() -> Vec<Card> {
     // deck.append(&mut duplicate_card(create_angel_of_vitality(), 4));
     // deck.append(&mut duplicate_card(create_plains(), 22));
 
-    deck.append(&mut duplicate_card(create_test_plains(), 1));
+    // deck.append(&mut duplicate_card(create_test_plains(), 1));
     // deck.append(&mut duplicate_card(create_test_card(), 4));
     // deck.append(&mut duplicate_card(create_ossification(), 7));
     // deck.append(&mut duplicate_card(create_skyclave_apparition(), 4));
@@ -116,8 +116,8 @@ pub fn create_angels_deck() -> Vec<Card> {
     deck.append(&mut duplicate_card(create_ossification(), 4));
     deck.append(&mut duplicate_card(create_counterspell(), 4));
     deck.append(&mut duplicate_card(create_lunarch_veteran(), 2));
-    // deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
-    // deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
+    deck.append(&mut duplicate_card(create_skyclave_cleric(), 4));
+    deck.append(&mut duplicate_card(create_lunarch_veteran(), 4));
     // deck.append(&mut duplicate_card(create_serra_ascendant(), 4));
 
     deck
@@ -301,102 +301,102 @@ pub fn create_skyclave_cleric() -> Card {
 //     )
 // }
 
-// // pub fn create_serra_ascendant() -> Card {
-// //     create_creature_card!(
-// //         "Serra Ascendant",
-// //         CreatureType::None,
-// //         "As long as you have 30 or more life, Serra Ascendant gets +5/+5 and has flying.",
-// //         1,
-// //         1,
-// //         [ManaType::Purple],
-// //         [],
-// //         CardActionTrigger::new(
-// //             ActionTriggerType::Continuous,
-// //             CardRequiredTarget::None,
-// //             Arc::new(ApplyDynamicEffectToCard::new(
-// //                 Arc::new(
-// //                     move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i16> + Send>> {
-// //                         Box::pin(async move {
-// //                             let owner = { card_arc.lock().await.owner.clone() };
+// pub fn create_serra_ascendant() -> Card {
+//     create_creature_card!(
+//         "Serra Ascendant",
+//         CreatureType::None,
+//         "As long as you have 30 or more life, Serra Ascendant gets +5/+5 and has flying.",
+//         1,
+//         1,
+//         [ManaType::Purple],
+//         [],
+//         CardActionTrigger::new(
+//             ActionTriggerType::Continuous,
+//             CardRequiredTarget::None,
+//             Arc::new(ApplyDynamicEffectToCard::new(
+//                 Arc::new(
+//                     move |card_arc: Arc<Mutex<Card>>| -> Pin<Box<dyn Future<Output = i16> + Send>> {
+//                         Box::pin(async move {
+//                             let owner = { card_arc.lock().await.owner.clone() };
 
-// //                             if let Some(owner_arc) = owner {
-// //                                 let owner = owner_arc.lock().await;
-// //                                 if owner.get_stat_value(StatType::Health) >= 30 {
-// //                                     5
-// //                                 } else {
-// //                                     0
-// //                                 }
-// //                             } else {
-// //                                 0
-// //                             }
-// //                         })
-// //                     },
-// //                 ),
-// //                 Arc::new(
-// //                     move |target,
-// //                           card,
-// //                           amount,
-// //                           id|
-// //                           -> Pin<
-// //                         Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
-// //                     > {
-// //                         Box::pin(async move {
-// //                             let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
+//                             if let Some(owner_arc) = owner {
+//                                 let owner = owner_arc.lock().await;
+//                                 if owner.get_stat_value(StatType::Health) >= 30 {
+//                                     5
+//                                 } else {
+//                                     0
+//                                 }
+//                             } else {
+//                                 0
+//                             }
+//                         })
+//                     },
+//                 ),
+//                 Arc::new(
+//                     move |target,
+//                           card,
+//                           amount,
+//                           id|
+//                           -> Pin<
+//                         Box<dyn Future<Output = Vec<Arc<Mutex<dyn Effect + Send + Sync>>>> + Send>,
+//                     > {
+//                         Box::pin(async move {
+//                             let mut effects: Vec<Arc<Mutex<dyn Effect + Send + Sync>>> = vec![];
 
-// //                             let (name, id) = {
-// //                                 let card = card.lock().await;
-// //                                 (card.name.clone(), card.id.clone())
-// //                             };
+//                             let (name, id) = {
+//                                 let card = card.lock().await;
+//                                 (card.name.clone(), card.id.clone())
+//                             };
 
-// //                             let mut effect = DynamicStatModifierEffect::new(
-// //                                 EffectTarget::Card(card.clone()),
-// //                                 StatType::Power,
-// //                                 amount.clone(),
-// //                                 ExpireContract::Never,
-// //                                 Some(card.clone()),
-// //                                 false,
-// //                             );
-// //                             let id = format!("{}-{}-{}-damage", card.lock().await.id, id, name);
-// //                             effect.id = EffectID(id.clone());
+//                             let mut effect = DynamicStatModifierEffect::new(
+//                                 EffectTarget::Card(card.clone()),
+//                                 StatType::Power,
+//                                 amount.clone(),
+//                                 ExpireContract::Never,
+//                                 Some(card.clone()),
+//                                 false,
+//                             );
+//                             let id = format!("{}-{}-{}-damage", card.lock().await.id, id, name);
+//                             effect.id = EffectID(id.clone());
 
-// //                             let total = (amount)(card.clone()).await;
-// //                             if total > 0 {
-// //                                 effects.push(Arc::new(Mutex::new(effect)));
-// //                                 let mut effect = StatModifierEffect::new(
-// //                                     EffectTarget::Card(card.clone()),
-// //                                     StatType::Flying,
-// //                                     1,
-// //                                     ExpireContract::Never,
-// //                                     Some(card.clone()),
-// //                                 );
+//                             let total = (amount)(card.clone()).await;
+//                             if total > 0 {
+//                                 effects.push(Arc::new(Mutex::new(effect)));
+//                                 let mut effect = StatModifierEffect::new(
+//                                     EffectTarget::Card(card.clone()),
+//                                     StatType::Flying,
+//                                     1,
+//                                     ExpireContract::Never,
+//                                     Some(card.clone()),
+//                                 );
 
-// //                                 let id = format!("{}-{}-{}-flying", card.lock().await.id, id, name);
-// //                                 effect.id = EffectID(id.clone());
-// //                                 effects.push(Arc::new(Mutex::new(effect)));
-// //                             }
+//                                 let id = format!("{}-{}-{}-flying", card.lock().await.id, id, name);
+//                                 effect.id = EffectID(id.clone());
+//                                 effects.push(Arc::new(Mutex::new(effect)));
+//                             }
 
-// //                             let mut effect = DynamicStatModifierEffect::new(
-// //                                 EffectTarget::Card(card.clone()),
-// //                                 StatType::Toughness,
-// //                                 amount.clone(),
-// //                                 ExpireContract::Never,
-// //                                 Some(card.clone()),
-// //                                 false,
-// //                             );
+//                             let mut effect = DynamicStatModifierEffect::new(
+//                                 EffectTarget::Card(card.clone()),
+//                                 StatType::Toughness,
+//                                 amount.clone(),
+//                                 ExpireContract::Never,
+//                                 Some(card.clone()),
+//                                 false,
+//                             );
 
-// //                             let id = format!("{}-{}-{}-defense", card.lock().await.id, id, name);
-// //                             effect.id = EffectID(id.clone());
-// //                             effects.push(Arc::new(Mutex::new(effect)));
+//                             let id = format!("{}-{}-{}-defense", card.lock().await.id, id, name);
+//                             effect.id = EffectID(id.clone());
+//                             effects.push(Arc::new(Mutex::new(effect)));
 
-// //                             println!("Applying effects! {:?}", effects);
-// //                             effects
-// //                         })
-// //                     },
-// //                 )
-// //             ),)
-// //         )
-// //     )
-// // }
+//                             println!("Applying effects! {:?}", effects);
+//                             effects
+//                         })
+//                     },
+//                 )
+//             ),)
+//         )
+//     )
+// }
 
 // pub fn create_youthful_valkyrie() -> Card {
 //     create_creature_card!(

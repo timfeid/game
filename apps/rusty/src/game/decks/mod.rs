@@ -6,6 +6,7 @@
 pub mod vegas;
 pub mod white;
 
+// use green::create_green_deck;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::borrow::BorrowMut;
@@ -67,7 +68,7 @@ impl Deck {
             // DeckSelector::Elves2 => create_green_deck_v2(),
             // DeckSelector::Blue => create_blue_deck(),
             // DeckSelector::Black => create_black_deck(),
-            // DeckSelector::Angels => create_angels_deck(),
+            DeckSelector::Angels => create_angels_deck(),
             // DeckSelector::Red => create_red_deck(),
             // DeckSelector::AngelsBlue => create_angels_blue_deck(),
             DeckSelector::Vegas => create_vegas_deck(),

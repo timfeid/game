@@ -144,6 +144,7 @@ pub enum DeckSelector {
     // Black,
     // Angels,
     Vegas,
+    Angels,
     // AngelsBlue,
     // Red,
 }
@@ -218,7 +219,7 @@ impl Lobby {
         return vec![
             // DeckSelector::Elves,
             // DeckSelector::Elves2,
-            // DeckSelector::Angels,
+            DeckSelector::Angels,
             // DeckSelector::Black,
             // DeckSelector::Blue,
             // DeckSelector::AngelsBlue,

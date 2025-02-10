@@ -81,7 +81,7 @@ export type ModalButton = { id: string; text: string }
 
 export type PublicPlayerInfo = { hand_size: number; cards_in_play: CardWithDetails[]; spells: CardWithDetails[]; mana_pool: ManaPool; health: number; luck_tokens: number }
 
-export type DeckSelector = "Vegas"
+export type DeckSelector = "Vegas" | "Angels"
 
 export type Card = { play_restrictions: [TurnPhase[], PhaseTarget] | null; creature_type: CreatureType | null; name: string; description: string; card_type: CardType; current_phase: CardPhase; tapped: boolean; cost: ManaType[]; is_countered: boolean; id: string; counters: { [key: string]: Counter }; play_target: CardRequiredTarget }
 
