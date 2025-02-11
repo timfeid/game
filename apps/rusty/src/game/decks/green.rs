@@ -1,28 +1,20 @@
 use crate::{
     game::{
         action::{
-            generate_mana::GenerateManaAction, Action, ActionTriggerType, ApplyDynamicEffectToCard,
-            ApplyEffectsToPlayerCreatureType, AsyncClosureAction, BlankAction, CardAction,
-            CardActionTarget, CardActionTrigger, CardActionWrapper, CardRequiredTarget,
-            CardTargetTeam, CastMandatoryAdditionalAbility, CastOptionalAdditionalAbility,
-            ChooseFromSelectionAction, DamageTarget, DeclareAttackerAction, DeclareBlockerAction,
-            DrawCardAction, DrawCardCardAction, PhaseTarget, PlayCardAction, PlayerActionTarget,
-            ReturnToHandAction, TapCardAction,
-        },
-        card::{
+            generate_mana::GenerateManaAction, Action, ActionBuilder, ActionTriggerType,
+            ApplyDynamicEffectToCard, ApplyEffectsToPlayerCreatureType, AsyncClosureAction,
+            BlankAction, CardAction, CardActionTarget, CardActionTrigger, CardActionWrapper,
+            CardRequiredTarget, CardTargetTeam, CastMandatoryAdditionalAbility,
+            CastOptionalAdditionalAbility, ChooseFromSelectionAction, DamageTarget,
+            DeclareAttackerAction, DeclareBlockerAction, DrawCardAction, DrawCardCardAction,
+            PhaseTarget, PlayCardAction, PlayerActionTarget, ReturnToHandAction, TapCardAction,
+        }, card::{
             card::{create_creature_card, create_multiple_cards},
-            Card, CardPhase, CardType, Counter, CreatureType,
-        },
-        decks::duplicate_card,
-        effects::{
+            Card, CardBuilder, CardPhase, CardType, Counter, CreatureType,
+        }, decks::duplicate_card, effects::{
             DynamicStatModifierEffect, Effect, EffectID, EffectTarget, ExpireContract,
             ModifyStatTarget, StatModifierEffect,
-        },
-        mana::ManaType,
-        player::Player,
-        stat::{Stat, StatType, StaticStatId, Stats},
-        turn::TurnPhase,
-        ActionType, CardWithDetails, Game,
+        }, mana::ManaType, player::Player, stat::{Stat, StatType, StaticStatId, Stats}, turn::TurnPhase, ActionType, CardWithDetails, FrontendTarget, Game
     },
     lobby::manager::{CardSelectionDetails, LobbyCommand},
 };
@@ -31,151 +23,101 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
-use super::green_a::create_tyvar_kell;
-
+// use super::green_a::create_tyvar_kell;
 fn create_test_forest() -> Card {
-    Card::new(
-        "Forest",
-        "",
-        vec![
-            CardActionTrigger::new(
-                ActionTriggerType::CardPlayedFromHand(Some((
-                    vec![
-                        TurnPhase::Untap,
-                        TurnPhase::Upkeep,
-                        TurnPhase::Draw,
-                        TurnPhase::Main,
-                        TurnPhase::BeginningOfCombat,
-                        TurnPhase::DeclareAttackers,
-                        TurnPhase::DeclareBlockers,
-                        TurnPhase::CombatDamage,
-                        TurnPhase::EndOfCombat,
-                        TurnPhase::Main2,
-                        TurnPhase::End,
-                        TurnPhase::Cleanup,
-                    ],
-                    PhaseTarget::Owner,
-                ))),
+    CardBuilder::new()
+        .name("Cheating card")
+        .card_type(CardType::BasicLand(ManaType::Green))
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Adds {G} mana to your pool.".to_string(),
+                vec![],
+                None,
+                true,
                 CardRequiredTarget::None,
-                Arc::new(BlankAction {}),
-            ),
-            CardActionTrigger::new(
-                ActionTriggerType::AbilityWithinPhases(
-                    "Add 1 {G} to your pool".to_string(),
-                    vec![],
-                    None,
-                    true,
-                ),
-                CardRequiredTarget::None,
-                Arc::new(GenerateManaAction {
-                    mana_to_add: vec![
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                        ManaType::Green,
-                    ],
-                    target: PlayerActionTarget::Owner,
-                }),
-            ),
-        ],
-        CardPhase::Ready,
-        CardType::BasicLand(ManaType::Green),
-        vec![],
-        vec![],
-    )
+            ))
+            .action(GenerateManaAction {
+                mana_to_add: vec![
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                    ManaType::Green,
+                ],
+                target: PlayerActionTarget::Owner,
+            }),
+        )
+        .build()
 }
-
 fn create_forest() -> Card {
-    Card::new(
-        "Forest",
-        "",
-        vec![
-            CardActionTrigger::new(
-                ActionTriggerType::CardPlayedFromHand(Some((
-                    vec![
-                        TurnPhase::Untap,
-                        TurnPhase::Upkeep,
-                        TurnPhase::Draw,
-                        TurnPhase::Main,
-                        TurnPhase::BeginningOfCombat,
-                        TurnPhase::DeclareAttackers,
-                        TurnPhase::DeclareBlockers,
-                        TurnPhase::CombatDamage,
-                        TurnPhase::EndOfCombat,
-                        TurnPhase::Main2,
-                        TurnPhase::End,
-                        TurnPhase::Cleanup,
-                    ],
-                    PhaseTarget::Owner,
-                ))),
+    CardBuilder::new()
+        .name("Cheating card")
+        .card_type(CardType::AdvancedMultiLand(
+            ManaType::Green,
+            ManaType::Influence,
+        ))
+        .add_action(
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Adds {G} mana to your pool.".to_string(),
+                vec![],
+                None,
+                true,
                 CardRequiredTarget::None,
-                Arc::new(BlankAction {}),
-            ),
-            CardActionTrigger::new(
-                ActionTriggerType::AbilityWithinPhases(
-                    "Add 1 {G} to your pool".to_string(),
-                    vec![],
-                    None,
-                    true,
-                ),
-                CardRequiredTarget::None,
-                Arc::new(GenerateManaAction {
-                    mana_to_add: vec![ManaType::Green],
-                    target: PlayerActionTarget::Owner,
-                }),
-            ),
-        ],
-        CardPhase::Ready,
-        CardType::BasicLand(ManaType::Green),
-        vec![],
-        vec![],
-    )
+            ))
+            .action(GenerateManaAction {
+                mana_to_add: vec![ManaType::Green],
+                target: PlayerActionTarget::Owner,
+            }),
+        )
+        .build()
 }
 
 pub fn create_devoted_druid() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Devoted Druid",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         0,
         2,
-        [ManaType::Colorless, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost(vec![ManaType::Colorless, ManaType::Green])
+        .add_action(ActionBuilder::new(
+
             ActionTriggerType::AbilityWithinPhases(
                 "Add {G} to your mana pool.".to_string(),
                 vec![],
                 None,
-                true
-            ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
+                true,
+                CardRequiredTarget::None,
+            )
+        ).action(
+            GenerateManaAction {
                 mana_to_add: vec![ManaType::Green],
                 target: PlayerActionTarget::Owner
-            })
-        ),
-        CardActionTrigger::new_with_requirements(
+            }
+        ))
+
+        .add_action(
+ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Put a -1/-1 counter on Devoted Druid: Untap Devoted Druid".to_string(),
                 vec![],
                 None,
-                false
-            ),
-            CardRequiredTarget::None,
-            Arc::new(AsyncClosureAction::new(Arc::new(
+                false,
+                CardRequiredTarget::None,
+            )
+        ).closure_action(
+
                 |game: Arc<Mutex<Game>>,
-                 card: Arc<Mutex<Card>>|
+                 card: Arc<Mutex<Card>>, _, _, _|
                  -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         Card::add_counter(
@@ -188,11 +130,11 @@ pub fn create_devoted_druid() -> Card {
                         Ok(())
                     })
                 }
-            ))),
-            Arc::new(
-                |game: Arc<Mutex<Game>>,
+            )
+        )
+        .play_requirements(|game: Arc<Mutex<Game>>,
                  card: Arc<Mutex<Card>>,
-                 ability_id: String|
+                 _|
                  -> Pin<Box<dyn Future<Output = bool> + Send>> {
                     Box::pin(async move {
                         if let Ok(card) = card.try_lock() {
@@ -203,20 +145,24 @@ pub fn create_devoted_druid() -> Card {
                     })
                 }
             )
-        )
-    )
+    .build()
 }
 
 pub fn create_elvish_warmaster() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Elvish Warmaster",
-        CreatureType::Elf,
-        "Whenever one or more other Elves you control enter, create a 1/1 green Elf Warrior creature token. This ability triggers only once each turn.",
+    ).
+        creature_of_type(
         2,
         2,
-        [ManaType::Colorless, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        .description("Whenever one or more other Elves you control enter, create a 1/1 green Elf Warrior creature token. This ability triggers only once each turn.")
+        .mana_cost(vec![ManaType::Colorless, ManaType::Green])
+        .add_action(
+
+            ActionBuilder::new(
+
             ActionTriggerType::AbilityWithinPhases(
                 "Elves you control get +2/+2 and gain deathtouch until end of turn.".to_string(),
                 vec![
@@ -230,10 +176,8 @@ pub fn create_elvish_warmaster() -> Card {
                 ],
                 None,
                 false,
-            ),
-            CardRequiredTarget::None,
-            Arc::new(AsyncClosureAction::new(Arc::new(
-                |game, card| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+                CardRequiredTarget::None,
+            )).closure_action(|game, card, _,_,_| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
                     Box::pin(async move {
                         let card_id = card.lock().await.id.clone();
                         let (owner, cards_in_play) = {
@@ -247,53 +191,51 @@ pub fn create_elvish_warmaster() -> Card {
                         for card in cards_in_play {
                             let card_in_play_id = card.lock().await.id.clone();
                             if card.lock().await.creature_type == Some(CreatureType::Elf) {
-                                let id = EffectID(format!("{}-{}-deathtouch", card_id, card_in_play_id));
-                                game.lock().await.effect_manager.add_effect(id,
-                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                let id = format!("{}-{}-deathtouch", card_id, card_in_play_id);
+                                Game::apply_effect(&game, StatModifierEffect::new(
+                                        id,
                                         EffectTarget::Card(card.clone()),
                                         StatType::Deathtouch,
                                         1,
                                         ExpireContract::Turns(1),
                                         None,
-                                    ))),
-                                );
-                                let id = EffectID(format!("{}-{}-toughness", card_id, card_in_play_id));
-                                game.lock().await.effect_manager.add_effect(id,
-                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                    )).await;
+                                let id = format!("{}-{}-toughness", card_id, card_in_play_id);
+                                Game::apply_effect(&game, StatModifierEffect::new(
+                                        id,
                                         EffectTarget::Card(card.clone()),
                                         StatType::Toughness,
                                         2,
                                         ExpireContract::Turns(1),
                                         None,
-                                    ))),
-                                );
-                                let id = EffectID(format!("{}-{}-power", card_id, card_in_play_id));
-                                game.lock().await.effect_manager.add_effect(id,
-                                    Arc::new(Mutex::new(StatModifierEffect::new(
+                                    )).await;
+                                let id = format!("{}-{}-power", card_id, card_in_play_id);
+                                Game::apply_effect(&game, StatModifierEffect::new(
+                                        id,
                                         EffectTarget::Card(card.clone()),
                                         StatType::Power,
                                         2,
                                         ExpireContract::Turns(1),
                                         None,
-                                    ))),
-                                );
+                                    )).await;
                             }
                         }
                         Ok(())
                     })
-                }
-            ))),
-        ),
+                })).add_action(
 
-        CardActionTrigger::new(
-            ActionTriggerType::CreatureTypeCardPlayed(PhaseTarget::Owner, CreatureType::Elf),
-            CardRequiredTarget::None,
-            Arc::new(AsyncClosureAction::new(Arc::new(
-                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+ActionBuilder::new(
+
+            ActionTriggerType::CreatureTypeCardPlayed(PhaseTarget::Owner, CreatureType::Elf)
+
+).closure_action(
+
+                |game: Arc<Mutex<Game>>, card: Arc<Mutex<Card>>, player, target, ability_id| -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
 
                     Box::pin(async move {
-                        if let EffectTarget::Card(target_card) = &target {
-                            if Arc::ptr_eq(&card, target_card) {
+                        if let Some(FrontendTarget::Card(target_card)) = &target {
+                            let me = Game::card_from_frontend_card_target(&game, target_card).await;
+                            if Arc::ptr_eq(&card, &me) {
                                 println!("Skipping card cause it is the same");
                                 return Ok(());
                             }
@@ -307,7 +249,7 @@ pub fn create_elvish_warmaster() -> Card {
 
                             if played == 1 {
                                 println!("{} was triggered becaused {:?} was played", card.lock().await.name, target);
-                                Game::play_token(&game, &owner, create_creature_card!("Token", CreatureType::Elf, "", 1,1, [], [])).await.ok();
+                                Game::play_token(&game, &owner, todo!()).await.ok();
                             } else {
                                 println!("{} was skipped becaused it already triggered this turn", card.lock().await.name);
 
@@ -316,21 +258,23 @@ pub fn create_elvish_warmaster() -> Card {
                         Ok(())
                     })
                 }
-            )))
-        )
-    )
+)
+                ).build()
 }
 
 pub fn create_llanowar_elves() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Llanowar Elves",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Add {G} to your mana pool.".to_string(),
                 vec![],
@@ -347,40 +291,46 @@ pub fn create_llanowar_elves() -> Card {
 }
 
 pub fn create_elvish_mystic() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Elvish Mystic",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Add {G} to your mana pool.".to_string(),
                 vec![],
                 None,
-                true
-            ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
+                true,
+                None,
+            )).action(
+
+            GenerateManaAction {
                 mana_to_add: vec![ManaType::Green],
                 target: PlayerActionTarget::Owner
             })
         )
-    )
 }
 
 pub fn create_elvish_archdruid() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Elvish Archdruid",
-        CreatureType::Elf,
-        "Other Elf creatures you control get +1/+1.",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Colorless, ManaType::Green, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "Other Elf creatures you control get +1/+1.",
+        .mana_cost([ManaType::Colorless, ManaType::Green, ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::Continuous,
             CardRequiredTarget::None,
             Arc::new(ApplyEffectsToPlayerCreatureType::new(
@@ -464,15 +414,18 @@ pub fn create_elvish_archdruid() -> Card {
 }
 
 pub fn create_priest_of_titania() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Priest of Titania",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Colorless, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Colorless, ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Add {G} for each Elf on the battlefield.".to_string(),
                 vec![],
@@ -520,15 +473,18 @@ fn regenerate_target_card() -> Arc<AsyncClosureAction> {
 }
 
 pub fn create_eladamri_korvecdal() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Eladamri, Korvecdal",
-        CreatureType::Elf,
-        "\nYou may cast creature spells from the top of your library.",
+    ).
+        creature_of_type(
         2,
         2,
-        [ManaType::Colorless, ManaType::Green, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "\nYou may cast creature spells from the top of your library.",
+        .mana_cost([ManaType::Colorless, ManaType::Green, ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "You may look at the top card of your library any time.".to_string(),
                 vec![],
@@ -717,15 +673,18 @@ pub fn create_eladamri_korvecdal() -> Card {
 }
 
 pub fn create_ezuri() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Ezuri, Renegade Leader",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         2,
         2,
-        [ManaType::Colorless, ManaType::Green, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Colorless, ManaType::Green, ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Regenerate another target Elf.".to_string(),
                 vec![ManaType::Green],
@@ -819,15 +778,18 @@ pub fn create_ezuri() -> Card {
 }
 
 pub fn create_heritage_druid() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Heritage Druid",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Green],
-        [],
-        CardActionTrigger::new_with_requirements(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases(
                 "Tap three untapped Elves you control: Add {G}{G}{G}.".to_string(),
                 vec![],
@@ -972,15 +934,18 @@ pub fn create_heritage_druid() -> Card {
 }
 
 pub fn create_wirewood() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Wirewood",
-        CreatureType::Elf,
-        "",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Green],
-        [],
-        CardActionTrigger::new_with_requirements(
+        CreatureType::Elf)
+        // ,
+        // "",
+        .mana_cost([ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::AbilityWithinPhases("Return an Elf you control to its owner's hand: Untap target creature. Activate only once each turn.".to_string(), vec![], None, false),
             CardRequiredTarget::None,
             Arc::new(CastMandatoryAdditionalAbility {
@@ -1065,15 +1030,18 @@ pub fn create_wirewood() -> Card {
 }
 
 pub fn create_leaf_crowned_visionary() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
         "Leaf-Crowned Visionary",
-        CreatureType::Elf,
-        "Other Elves you control get +1/+1.\nWhenever you cast an Elf spell, you may pay {G}. If you do, draw a card.",
+    ).
+        creature_of_type(
         1,
         1,
-        [ManaType::Green, ManaType::Green],
-        [],
-        CardActionTrigger::new(
+        CreatureType::Elf)
+        // ,
+        // "Other Elves you control get +1/+1.\nWhenever you cast an Elf spell, you may pay {G}. If you do, draw a card.",
+        .mana_cost([ManaType::Green, ManaType::Green])
+        .add_action(
+           ActionBuilder::new(
             ActionTriggerType::OtherCardPlayed(PhaseTarget::Owner),
             CardRequiredTarget::None,
             Arc::new(CastOptionalAdditionalAbility::new(
@@ -1349,15 +1317,18 @@ pub fn create_chord_of_calling() -> Card {
 }
 
 pub fn create_quirion_ranger() -> Card {
-    create_creature_card!(
+    CardBuilder::new().name(
             "Quirion Ranger",
-            CreatureType::Elf,
-            "",
+    ).
+        creature_of_type(
             2,
             2,
-            [ManaType::Colorless, ManaType::Green],
-            [],
-            CardActionTrigger::new_with_requirements(
+            CreatureType::Elf)
+            // ,
+            // "",
+        .mana_cost(    [ManaType::Colorless, ManaType::Green]),
+            .add_action(
+               ActionBuilder::new(
                 ActionTriggerType::AbilityWithinPhases(
                     "Return a Forest you control to its owner's hand: Untap target creature. Activate only once each turn.".to_string(),
                     vec![],
