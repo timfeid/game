@@ -1,166 +1,139 @@
 <script lang="ts">
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import type {
-		AbilityDetails,
-		CardWithDetails,
-		ExecuteAbility,
-		FrontendTarget,
-		GameState,
-		PlayerState
-	} from '@gangsta/rusty';
-	import { RSPCError } from '@rspc/client';
+	import type { GameState, PlayerState } from '@gangsta/rusty';
 	import { RectangleVertical } from 'lucide-svelte';
 	import HeartPulse from 'lucide-svelte/icons/heart-pulse';
-	import { toast } from 'svelte-sonner';
-	import { client } from '../../client';
+	import Clover from 'lucide-svelte/icons/clover';
 	import { user } from '../../stores/access-token';
-	import CCard from './Card.svelte';
-	import { searchingForTarget, target, waitForTarget } from './game';
+	import PlayingCardWithAttachments from './card/playing-card-with-attachments.svelte';
+	import CCard from './card/playing-card.svelte';
+	import { searchingForTarget, target } from './game';
 	import ManaBubble from './mana-bubble/mana-bubble.svelte';
-	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
+	import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
+	import { onMount } from 'svelte';
 
-	export let game: GameState;
-	export let code: string;
-	export let playerName: string;
-	export let player: PlayerState;
+	type Props = {
+		game: GameState;
+		code: string;
+		playerName: string;
+		player: PlayerState;
+		index: number;
+	};
 
-	$: self = game.players[$user?.sub || ''];
-
-	async function executeAction(
-		index: number,
-		card: CardWithDetails,
-		target: FrontendTarget | null,
-		ability: AbilityDetails
-	) {
-		try {
-			await client.mutation([
-				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
-				{
-					code,
-					card: card.frontend_target,
-					target,
-					trigger_id: ability.id
-				}
-			]);
-		} catch (e) {
-			if (e instanceof RSPCError) {
-				return toast.error(e.message);
-			}
-			toast.error('Unknown error!');
-		}
-	}
-
-	async function selectAbilityDialog(abilities: AbilityDetails[]): Promise<AbilityDetails> {
-		return await new Promise((resolve, reject) => {
-			let t: NodeJS.Timeout;
-			toast.info('Please select an ability');
-			selectedAbility.set(null);
-			selectFromAbilities.set(abilities);
-			selectedAbility.subscribe((ability) => {
-				if (ability) {
-					clearTimeout(t);
-					resolve(ability);
-				}
-			});
-			t = setTimeout(() => reject('ran out of time'), 10000);
-		});
-	}
-
-	async function selectAbility(card: CardWithDetails) {
-		let met = card.abilities.filter(
-			(c) => c.meets_mana_requirements && c.meets_requirements_except_mana
-		);
-		if (met.length === 0) {
-			return;
-		}
-		if (met.length === 1) {
-			return met[0];
-		}
-
-		return selectAbilityDialog(met);
-	}
-
-	async function actionSpell(index: number) {
-		console.log(index, 'was clicked on', playerName, player);
-		console.log(self);
-		if ($searchingForTarget) {
-			console.log('set target.');
-			target.set({ Card: { player_id: player.sub, card_index: index, pile: 'Spell' } });
-			return;
-		}
-		const card = player.public_info.cards_in_play[index];
-		if (self.player_index === player.player_index && card) {
-			const ability = await selectAbility(card);
-			if (ability) {
-				const target = await waitForTarget(ability, game);
-				return await executeAction(index, card, target, ability);
-			}
-		}
-	}
+	let { game, index, code, playerName, player }: Props = $props();
+	let showBattlefieldTargets = $state(false);
 
 	async function setPlayerTarget(player: PlayerState) {
-		target.set({ Player: player.player_index });
+		target.set({ Player: player.sub });
 	}
+
+	function chooseBattlefield(battlefield: 'FrontlineBattlefield' | 'BacklineBattlefield') {
+		target.set(battlefield);
+	}
+
+	onMount(() => {
+		const unsubscribe = searchingForTarget.subscribe((target) => {
+			if (player.sub !== $user?.sub) {
+				return;
+			}
+			showBattlefieldTargets = false;
+			console.log('hello', target);
+			if (target && target === 'ChosenBattlefield') {
+				console.log('hello');
+				showBattlefieldTargets = true;
+				return;
+			}
+
+			if (target === 'BacklineBattlefield' || target === 'FrontlineBattlefield') {
+				return chooseBattlefield(target);
+			}
+		});
+		return () => unsubscribe();
+	});
 </script>
 
-<Card class="dark:bg-gray-950">
-	<CardHeader class="space-y-1">
-		<CardTitle class="text-2xl font-bold text-center flex items-center">
-			<button on:click={() => setPlayerTarget(player)}>
-				<div class="mr-4 flex items-center space-x-1">
-					<div>
-						{playerName}
+<div class="flex-grow container h-full flex">
+	<Card class="bg-transparent border-0 p-0 flex-grow flex flex-col">
+		<CardHeader class="space-y-1">
+			<CardTitle class="text-2xl font-bold text-center flex items-center">
+				<button data-player={player.sub} onclick={() => setPlayerTarget(player)}>
+					<div class="mr-4 flex items-center space-x-1">
+						<div>
+							{playerName}
+						</div>
+						<sub class="text-xs">
+							{#if playerName === $user?.sub}(it's you){/if}
+						</sub>
 					</div>
-					<sub class="text-xs">
-						{#if playerName === $user?.sub}(it's you){/if}
-					</sub>
-				</div>
-			</button>
-			<div class="flex space-x-2 items-center"></div>
-			<div class="ml-auto flex flex-col">
-				<div class="flex items-center">
-					{#each { length: player.public_info.hand_size } as _}
-						<RectangleVertical />
-					{/each}
-					<HeartPulse />
-					<div class="ml-2">
-						{player.public_info.health}
-					</div>
-				</div>
-				{#if Object.values(player.public_info.mana_pool).find((x) => x !== true && x > 0)}
-					<div class="ml-auto flex items-center space-x-2">
-						<div class="text-xs uppercase">Mana pool</div>
-						{#each Object.keys(player.public_info.mana_pool) as key}
-							{@const val = player.public_info.mana_pool[key]}
-							{#if Number.isInteger(val)}
-								{#each { length: val } as _, i}
-									<ManaBubble color={key} />
-								{/each}
-							{/if}
+				</button>
+				<div class="flex space-x-2 items-center"></div>
+				<div class="ml-auto flex flex-col">
+					<div class="flex items-center">
+						{#each { length: player.public_info.hand_size } as _}
+							<RectangleVertical />
 						{/each}
+						<div class="flex space-x-2 items-center ml-3">
+							<HeartPulse class="mr-2" />
+							{player.public_info.health}
+						</div>
 					</div>
+					{#if Object.values(player.public_info.mana_pool).find((x) => x !== true && x > 0)}
+						<div class="ml-auto flex items-center space-x-2">
+							<div class="text-xs uppercase">Mana pool</div>
+							{#each Object.keys(player.public_info.mana_pool) as key}
+								{@const val = player.public_info.mana_pool[key]}
+								{#if Number.isInteger(val)}
+									{#each { length: val } as _, i}
+										<ManaBubble color={key} />
+									{/each}
+								{/if}
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</CardTitle>
+		</CardHeader>
+		<CardContent class="flex flex-col {index !== 0 ? '' : 'flex-col-reverse'} flex-grow">
+			<div class="py-8 flex flex-wrap justify-center gap-2 flex-grow">
+				{#each player.public_info.cards_in_play as card, i}
+					{#if card.position === 'Frontline' && card.attached_to === null}
+						<PlayingCardWithAttachments {game} cardWithDetails={card} />
+					{/if}
+				{/each}
+				{#if showBattlefieldTargets}
+					<button
+						onclick={() => chooseBattlefield('FrontlineBattlefield')}
+						class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif justify-center items-center border rounded"
+						>frontline</button
+					>
 				{/if}
 			</div>
-		</CardTitle>
-	</CardHeader>
-	<CardContent class="space-y-4">
-		<div class="flex flex-wrap gap-2">
-			{#each player.public_info.cards_in_play as card, i}
-				{#if typeof card.card.card_type !== 'string'}
-					<CCard {game} cardWithDetails={card}></CCard>
+			<div
+				class="py-8 bg-gray-300 dark:bg-gray-900 flex flex-wrap gap-2 flex-grow relative justify-center {index !==
+				0
+					? ' border-t'
+					: ' border-b'}"
+			>
+				<div
+					class="absolute bg-gray-300 dark:bg-gray-900 px-4 left-1/2 -translate-x-1/2 {index !== 0
+						? 'top-0 -translate-y-1/2'
+						: 'bottom-0 translate-y-1/2'}"
+				>
+					backline
+				</div>
+				{#each player.public_info.cards_in_play as card, i}
+					{#if card.position === 'Backline' && card.attached_to === null}
+						<PlayingCardWithAttachments {game} cardWithDetails={card} />
+					{/if}
+				{/each}
+				{#if showBattlefieldTargets}
+					<button
+						onclick={() => chooseBattlefield('BacklineBattlefield')}
+						class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif justify-center items-center border rounded"
+						>backline</button
+					>
 				{/if}
-			{/each}
-		</div>
-		<div class="flex flex-wrap gap-2">
-			{#each player.public_info.cards_in_play as card, i}
-				{#if typeof card.card.card_type === 'string'}
-					<CCard {game} cardWithDetails={card}></CCard>
-				{/if}
-			{/each}
-			{#each player.public_info.spells as card, i}
-				<CCard {game} class="opacity-50" on:click={() => actionSpell(i)} cardWithDetails={card}
-				></CCard>
-			{/each}
-		</div>
-	</CardContent>
-</Card>
+			</div>
+		</CardContent>
+	</Card>
+</div>

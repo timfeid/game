@@ -19,6 +19,12 @@ use crate::{
 };
 
 #[derive(Type, Serialize, Deserialize)]
+pub struct RespondCardSelectionButton {
+    pub code: String,
+    pub button_id: String,
+}
+
+#[derive(Type, Serialize, Deserialize)]
 pub struct RespondCardSelection {
     pub code: String,
     pub target: Option<FrontendTarget>,
@@ -51,13 +57,6 @@ pub struct ActionCardArgs {
 pub struct SelectDeckArgs {
     pub code: String,
     pub deck: DeckSelector,
-}
-
-#[derive(Type, Serialize, Deserialize)]
-pub struct PlayCardArgs {
-    pub code: String,
-    pub in_hand_index: i32,
-    pub target: Option<FrontendTarget>,
 }
 
 #[derive(Deserialize, Type)]
@@ -187,13 +186,6 @@ impl LobbyController {
         Ok(())
     }
 
-    pub(crate) async fn attach_card(ctx: Ctx, args: ActionCardArgs) -> AppResult<()> {
-        let user = ctx.required_user()?;
-        ctx.lobby_manager.attach_card(args, user).await?;
-
-        Ok(())
-    }
-
     pub(crate) async fn respond_optional_ability(
         ctx: Ctx,
         args: RespondOptionalAbility,
@@ -202,13 +194,6 @@ impl LobbyController {
         ctx.lobby_manager
             .respond_optional_player_ability(args, user)
             .await?;
-
-        Ok(())
-    }
-
-    pub(crate) async fn play_card(ctx: Ctx, args: PlayCardArgs) -> AppResult<()> {
-        let user = ctx.required_user()?;
-        ctx.lobby_manager.play_card(args, user).await?;
 
         Ok(())
     }
@@ -283,6 +268,18 @@ impl LobbyController {
         };
         let async_stream = async_stream;
         async_stream
+    }
+
+    pub(crate) async fn respond_card_selection_button(
+        ctx: Ctx,
+        args: RespondCardSelectionButton,
+    ) -> AppResult<()> {
+        let user = ctx.required_user()?;
+        ctx.lobby_manager
+            .respond_card_selection_button(args, user)
+            .await?;
+
+        Ok(())
     }
 
     pub(crate) async fn respond_card_selection(

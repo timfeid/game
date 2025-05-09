@@ -3,35 +3,38 @@ import type {
 	CardRequiredTarget,
 	CardTargetTeam,
 	CardType,
+	CardWithDetails,
 	CreatureType,
 	FrontendCardTarget,
 	FrontendTarget,
-	GameState,
-	StatManager
+	GameState
 } from '@gangsta/rusty';
 import { tick } from 'svelte';
 import { toast } from 'svelte-sonner';
 import { writable } from 'svelte/store';
 
 export const target = writable<FrontendTarget | null>();
-export const searchingForTarget = writable(false);
+export const searchingForTarget = writable<false | CardRequiredTarget>(false);
 
-function extractDamageAndDefense(stats: StatManager) {
-	let power = 0;
-	let toughness = 0;
-	for (const stat of Object.values(stats.stats)) {
-		if (stat.stat_type === 'Power') {
-			power += stat.intensity;
-		} else if (stat.stat_type === 'Toughness') {
-			toughness += stat.intensity;
-		}
-	}
+function extractDamageAndDefense(stats: CardWithDetails['stats']) {
+	const power = 0;
+	const toughness = 0;
+	// for (const stat of Object.values(stats)) {
+	// 	if (stat.stat_type === 'Power') {
+	// 		power += stat.intensity;
+	// 	} else if (stat.stat_type === 'Toughness') {
+	// 		toughness += stat.intensity;
+	// 	}
+	// }
 
 	return { power, toughness };
 }
 
-function isPlayer(frontendTarget: FrontendTarget | null): frontendTarget is { Player: number } {
+function isPlayer(frontendTarget: FrontendTarget | null): frontendTarget is { Player: string } {
 	if (!frontendTarget) {
+		return false;
+	}
+	if (typeof frontendTarget === 'string') {
 		return false;
 	}
 	return 'Player' in frontendTarget;
@@ -41,6 +44,9 @@ function isCard(
 	frontendTarget: FrontendTarget | null
 ): frontendTarget is { Card: FrontendCardTarget } {
 	if (!frontendTarget) {
+		return false;
+	}
+	if (typeof frontendTarget === 'string') {
 		return false;
 	}
 	return 'Card' in frontendTarget;
@@ -75,7 +81,7 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 		toast.info('Please select your target');
 		target.set(null);
 		target.subscribe((frontendTarget) => {
-			console.log(game, game.players);
+			console.log('FRONTEND TARGET', frontendTarget);
 			if (isCard(frontendTarget)) {
 				const targetPlayer = game.players[frontendTarget.Card.player_id];
 				let pile;
@@ -122,7 +128,7 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 						// if (team)
 						// TODO: check the team, too
 						const { power: cardPower, toughness: cardToughness } = extractDamageAndDefense(
-							ccard.card.stats
+							ccard.stats
 						);
 						if (
 							ccard.card.card_type === 'Creature' &&
@@ -160,6 +166,11 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 							return resolve(frontendTarget);
 						}
 					}
+					if (ability.required_target === 'EnemyCardOrPlayer') {
+						// prob check team ?
+
+						return resolve(frontendTarget);
+					}
 					// console.log(ability.required_target);
 					// if ((ability.required_target as any).CardOfType) {
 					// 	// if ((frontendTarget.Card. as any).CardOfType);
@@ -170,9 +181,16 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 				}
 			} else if (isPlayer(frontendTarget)) {
 				console.log("it's a player,", frontendTarget);
+				if (ability.required_target === 'AnyPlayer') {
+					return resolve(frontendTarget);
+				}
 				if (ability.required_target === 'EnemyCardOrPlayer') {
 					return resolve(frontendTarget);
 				}
+			}
+
+			if (frontendTarget === 'BacklineBattlefield' || frontendTarget === 'FrontlineBattlefield') {
+				return resolve(frontendTarget);
 			}
 
 			if (frontendTarget && ability.required_target) {
@@ -184,19 +202,14 @@ async function search(ability: AbilityDetails, game: GameState): Promise<null | 
 
 export async function waitForTarget(
 	ability: AbilityDetails,
-	game: GameState,
-	forPlay = false
+	game: GameState
 ): Promise<null | FrontendTarget> {
 	if (!ability || ability.required_target === 'None') {
 		return null;
 	}
-	if (ability.action_type !== 'Instant' && forPlay) {
-		console.log('no?');
-		return null;
-	}
 
 	target.set(null);
-	searchingForTarget.set(true);
+	searchingForTarget.set(ability.required_target);
 	await tick();
 	const response = await search(ability, game);
 	searchingForTarget.set(false);

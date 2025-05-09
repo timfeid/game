@@ -24,7 +24,6 @@ pub enum ModifyStatTarget {
 pub enum EffectTarget {
     Player(Arc<Mutex<Player>>),
     Card(Arc<Mutex<Card>>),
-    CardId(String),
 }
 
 // Define a unique identifier for each effect
@@ -89,7 +88,7 @@ impl EffectManager {
     }
 
     pub async fn apply_effects(&mut self, turn: Turn) {
-        println!("Apply effects called!");
+        // println!("Apply effects called!");
         let effect_ids: Vec<EffectID> = self.effects.keys().cloned().collect();
         for effect_id in effect_ids {
             if let Some(effect_arc) = self.effects.clone().get(&effect_id) {
@@ -114,8 +113,7 @@ impl EffectManager {
             .collect();
 
         for (effect_id, effect_arc) in effect_entries {
-            let effect = effect_arc.lock().await;
-            if let Some(effect_source_card) = effect.get_source_card() {
+            if let Some(effect_source_card) = effect_arc.lock().await.get_source_card() {
                 if Arc::ptr_eq(effect_source_card, source_card) {
                     return true;
                 }
@@ -217,10 +215,7 @@ impl Effect for AddTriggerEffect {
         self.source_card.as_ref()
     }
     async fn apply(&mut self, turn: Turn) {
-        println!("WE CALLED APPLY ON TRIGGER EFFECT FOR TURN {:?}", turn);
         if !self.applied {
-            // let mut card = card_arc.lock().await;
-            // card.mark_exiled();
             self.target.lock().await.triggers.push(self.trigger.clone());
             self.target_trigger_index = Some(self.target.lock().await.triggers.len() - 1);
             self.applied = true;
@@ -317,7 +312,7 @@ impl Effect for ExileCardEffect {
                 // let mut card = card_arc.lock().await;
                 // card.mark_exiled();
                 self.target_id = Some(card_arc.lock().await.id.clone());
-                self.game.lock().await.exile_card(card_arc).await;
+                Game::exile_card(&self.game, card_arc).await;
                 println!("exiled card.");
             }
             self.applied = true;
@@ -348,9 +343,9 @@ impl Effect for ExileCardEffect {
     }
 
     async fn cleanup(&mut self) {
-        if let EffectTarget::CardId(target_id) = &self.target {
+        if let Some(id) = &self.target_id {
             println!("returning card.");
-            Game::exiled_card_to_battlefield(&self.game, target_id.clone()).await;
+            Game::exiled_card_to_battlefield(&self.game, id.clone()).await;
         }
     }
 
@@ -373,6 +368,7 @@ pub struct StatModifierEffect {
 
 impl StatModifierEffect {
     pub fn new(
+        id: String,
         target: EffectTarget,
         stat_type: StatType,
         amount: i16,
@@ -385,7 +381,7 @@ impl StatModifierEffect {
             source_card,
             amount,
             expires,
-            id: EffectID::new(),
+            id: EffectID(id),
             applied: false,
             previous_turn: None,
         }
@@ -404,17 +400,14 @@ impl Effect for StatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     card.stats
-                        .add_stat(id, Stat::new(self.stat_type, self.amount))
-                        .await;
+                        .add_stat(id, Stat::new(self.stat_type.clone(), self.amount));
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
                     player
                         .stat_manager
-                        .add_stat(id, Stat::new(self.stat_type, self.amount))
-                        .await;
+                        .add_stat(id, Stat::new(self.stat_type.clone(), self.amount));
                 }
-                EffectTarget::CardId(id) => todo!(),
             }
             self.applied = true;
         }
@@ -448,13 +441,12 @@ impl Effect for StatModifierEffect {
         match &self.target {
             EffectTarget::Card(card_arc) => {
                 let mut card = card_arc.lock().await;
-                card.stats.remove_stat(id_str).await;
+                card.stats.remove_stat(id_str);
             }
             EffectTarget::Player(player_arc) => {
                 let mut player = player_arc.lock().await;
-                player.stat_manager.remove_stat(id_str).await;
+                player.stat_manager.remove_stat(id_str);
             }
-            EffectTarget::CardId(_) => todo!(),
         }
     }
 
@@ -542,13 +534,12 @@ impl Effect for DynamicStatModifierEffect {
             match &self.target {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
-                    card.stats.remove_stat(id_str).await;
+                    card.stats.remove_stat(id_str);
                 }
                 EffectTarget::Player(player_arc) => {
                     let mut player = player_arc.lock().await;
-                    player.stat_manager.remove_stat(id_str).await;
+                    player.stat_manager.remove_stat(id_str);
                 }
-                EffectTarget::CardId(_) => todo!(),
             }
         }
     }
@@ -564,12 +555,11 @@ impl Effect for DynamicStatModifierEffect {
                 EffectTarget::Card(card_arc) => {
                     let mut card = card_arc.lock().await;
                     if self.permanent_change {
-                        card.stats.modify_stat(self.stat_type, amount).await;
+                        card.stats.modify_stat(self.stat_type.clone(), amount);
                     } else {
                         // println!("{} should get {} {}", card.name, id, amount);
                         card.stats
-                            .add_stat(id, Stat::new(self.stat_type, amount))
-                            .await;
+                            .add_stat(id, Stat::new(self.stat_type.clone(), amount));
                     }
                 }
                 EffectTarget::Player(player_arc) => {
@@ -577,16 +567,13 @@ impl Effect for DynamicStatModifierEffect {
                     if self.permanent_change {
                         player
                             .stat_manager
-                            .modify_stat(self.stat_type, amount)
-                            .await;
+                            .modify_stat(self.stat_type.clone(), amount);
                     } else {
                         player
                             .stat_manager
-                            .add_stat(id, Stat::new(self.stat_type, amount))
-                            .await;
+                            .add_stat(id, Stat::new(self.stat_type.clone(), amount));
                     }
                 }
-                EffectTarget::CardId(_) => todo!(),
             }
             self.applied = true;
         }

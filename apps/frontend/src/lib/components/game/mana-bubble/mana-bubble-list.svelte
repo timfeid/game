@@ -12,7 +12,7 @@
 	$: nonColorlessMana = mana.filter((m) => m !== 'Colorless');
 </script>
 
-<div class="relative inline-flex space-x-[2px] h-[10px] items-center {className}">
+<div class="inline-flex space-x-[2px] {className}">
 	{#if colorlessCount > 0}
 		<ManaBubble
 			class={big ? ' top-[-2px] !h-[16px] !w-[16px]' : ''}

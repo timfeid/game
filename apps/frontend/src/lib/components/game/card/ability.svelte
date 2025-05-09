@@ -16,24 +16,28 @@
 <Tooltip>
 	<svelte:component
 		this={noTooltips ? Fragment : TooltipTrigger}
-		class="min-h-[16px] text-left line-clamp-3"
+		class="min-h-[16px] text-left line-clamp-3 relative space-x-1"
 	>
-		{#if ability.action_type == 'Tap'}
-			<CornerDownLeft size="10" class="rotate-180 shrink-0 inline" />
+		{#if ability.tap_required}
+			<CornerDownLeft
+				size="10"
+				class="relative top-[4px] rotate-180 shrink-0 inline-block float-left"
+			/>
 		{/if}
-		<ManaBubbleList
-			class={offsetTop && ability.mana_cost.length ? '' : ''}
-			mana={ability.mana_cost}
-		/>
+
+		<ManaBubbleList class="relative top-[2px] float-left" mana={ability.mana_cost} />
 
 		<span
-			class:text-muted={!ability.meets_requirements_except_mana && !inHand && !noTooltips}
+			class:text-muted={(!ability.meets_requirements_except_mana ||
+				!ability.meets_mana_requirements) &&
+				!inHand &&
+				!noTooltips}
 			class="leading-[16px] min-h-[16px] text-left">{ability.description}</span
 		>
 	</svelte:component>
 	<TooltipContent class="max-w-[13rem] text-left text-base" side="bottom">
 		<div class="border-b pb-2 mb-2 border-gray-300">
-			{#if ability.action_type == 'Tap'}
+			{#if ability.tap_required}
 				<CornerDownLeft size="10" class="rotate-180 shrink-0 inline" />
 			{/if}
 

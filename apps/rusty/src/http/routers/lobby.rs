@@ -14,8 +14,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::error::AppError;
 use crate::http::controllers::lobby::ActionCardArgs;
 use crate::http::controllers::lobby::LobbyChatArgs;
-use crate::http::controllers::lobby::PlayCardArgs;
 use crate::http::controllers::lobby::RespondCardSelection;
+use crate::http::controllers::lobby::RespondCardSelectionButton;
 use crate::http::controllers::lobby::RespondMandatoryAbility;
 use crate::http::controllers::lobby::RespondOptionalAbility;
 use crate::http::controllers::lobby::SelectDeckArgs;
@@ -43,11 +43,6 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         .mutation("turn", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::turn(ctx, code).await?) })
         })
-        .mutation("attach_card", |t| {
-            t(|ctx, args: ActionCardArgs| async move {
-                Ok(LobbyController::attach_card(ctx, args).await?)
-            })
-        })
         .mutation("respond.mandatory_ability", |t| {
             t(|ctx, args: RespondMandatoryAbility| async move {
                 Ok(LobbyController::respond_mandatory_ability(ctx, args).await?)
@@ -56,6 +51,11 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
         .mutation("respond.optional_ability", |t| {
             t(|ctx, args: RespondOptionalAbility| async move {
                 Ok(LobbyController::respond_optional_ability(ctx, args).await?)
+            })
+        })
+        .mutation("respond.card_selection_button", |t| {
+            t(|ctx, args: RespondCardSelectionButton| async move {
+                Ok(LobbyController::respond_card_selection_button(ctx, args).await?)
             })
         })
         .mutation("respond.card_selection", |t| {
@@ -67,13 +67,6 @@ pub fn create_lobby_router() -> rspc::RouterBuilder<Ctx> {
             t(|ctx, args: ActionCardArgs| async move {
                 Ok(LobbyController::action_card(ctx, args).await?)
             })
-        })
-        .mutation("play_card", |t| {
-            t(
-                |ctx, args: PlayCardArgs| async move {
-                    Ok(LobbyController::play_card(ctx, args).await?)
-                },
-            )
         })
         .mutation("join", |t| {
             t(|ctx, code: String| async move { Ok(LobbyController::join(ctx, code).await?) })

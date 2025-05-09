@@ -1,18 +1,21 @@
 use super::{
-    action::{Action, CardActionTarget},
+    action::{Action, ActionTriggerType, CardActionTarget, CardActionWrapper},
     card::Card,
-    effects::EffectTarget,
+    effects::{Effect, EffectTarget},
     player::Player,
-    Game,
+    FrontendTarget, Game,
 };
-use crate::game::stat::{Stat, StatType, StaticStatId, Stats};
+use crate::game::{
+    card,
+    stat::{Stat, StatType, StaticStatId, Stats},
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Combat {
-    pub attackers: Vec<(Arc<Mutex<Card>>, EffectTarget)>,
+    pub attackers: Vec<(Arc<Mutex<Card>>, FrontendTarget)>,
     pub blockers: Vec<(Arc<Mutex<Card>>, Arc<Mutex<Card>>)>,
 }
 
@@ -25,7 +28,7 @@ impl Combat {
     pub async fn declare_attacker(
         &mut self,
         attacker_card: Arc<Mutex<Card>>,
-        target: EffectTarget,
+        target: FrontendTarget,
     ) {
         let attackers = self.attackers.clone();
         for (index, (attacker, _)) in attackers.iter().enumerate() {
@@ -77,7 +80,29 @@ impl Combat {
         }
     }
 
-    pub async fn resolve_combat(&mut self) -> Vec<Arc<Mutex<Card>>> {
+    pub async fn convert_attackers(
+        game: &Arc<Mutex<Game>>,
+        attackers: Vec<(Arc<Mutex<Card>>, FrontendTarget)>,
+    ) -> Vec<(Arc<Mutex<Card>>, EffectTarget)> {
+        let mut response: Vec<(Arc<Mutex<Card>>, EffectTarget)> = vec![];
+        for (attacker, target) in attackers.iter() {
+            response.push((
+                Arc::clone(attacker),
+                Game::frontend_card_to_effect_target(game, target).await,
+            ));
+        }
+
+        response
+    }
+
+    pub async fn resolve_combat(
+        &mut self,
+        attackers: Vec<(Arc<Mutex<Card>>, EffectTarget)>,
+    ) -> (
+        Vec<Arc<Mutex<Card>>>,
+        Vec<(Arc<Mutex<Card>>, EffectTarget, i16)>,
+    ) {
+        let mut damages = vec![];
         println!("Resolving combat damage.");
         let mut destroyed_cards = Vec::new();
 
@@ -109,12 +134,15 @@ impl Combat {
                     if blocker_card.get_stat_value(StatType::Regenerate) > 0 {
                         blocker_card.damage_taken = 0;
                         blocker_card.tapped = true;
-                        blocker_card
-                            .remove_stat(StaticStatId::Regenerate.to_string())
-                            .await;
+                        blocker_card.remove_stat(StaticStatId::Regenerate.to_string());
                     } else {
                         destroyed_cards.push(Arc::clone(blocking_card_arc));
                     }
+                } else {
+                    blocker_card.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -attacker_damage),
+                    );
                 }
             }
 
@@ -143,18 +171,21 @@ impl Combat {
                     if attacker_card.get_stat_value(StatType::Regenerate) > 0 {
                         attacker_card.damage_taken = 0;
                         attacker_card.tapped = true;
-                        attacker_card
-                            .remove_stat(StaticStatId::Regenerate.to_string())
-                            .await;
+                        attacker_card.remove_stat(StaticStatId::Regenerate.to_string());
                     } else {
                         destroyed_cards.push(Arc::clone(attacker_card_arc));
                     }
+                } else {
+                    attacker_card.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -blocker_damage),
+                    );
                 }
             }
         }
 
         // Then, resolve unblocked attackers and handle Trample
-        for (attacker_card_arc, target) in &self.attackers {
+        for (attacker_card_arc, target) in &attackers {
             // Check if this attacker was blocked
             let mut is_blocked = false;
             let mut total_blocker_toughness = 0;
@@ -179,6 +210,11 @@ impl Combat {
             if !is_blocked {
                 self.apply_damage_to_target(attacker_damage, target, attacker_card_arc)
                     .await;
+                damages.push((
+                    attacker_card_arc.clone(),
+                    target.clone(),
+                    attacker_damage.clone(),
+                ));
             } else {
                 // Handle blocked attackers and check for Trample
                 let has_trample = {
@@ -191,6 +227,11 @@ impl Combat {
                     if excess_damage > 0 {
                         self.apply_damage_to_target(excess_damage, target, attacker_card_arc)
                             .await;
+                        damages.push((
+                            attacker_card_arc.clone(),
+                            target.clone(),
+                            excess_damage.clone(),
+                        ));
                     }
                 }
             }
@@ -199,7 +240,7 @@ impl Combat {
         self.attackers.clear();
         self.blockers.clear();
 
-        destroyed_cards
+        (destroyed_cards, damages)
     }
 
     async fn apply_damage_to_target(
@@ -210,43 +251,48 @@ impl Combat {
     ) -> Option<Arc<Mutex<Card>>> {
         match target {
             EffectTarget::Player(player_arc) => {
-                let mut player = player_arc.lock().await;
-                let id = format!(
-                    "damage-{}-{}",
-                    attacker_card_arc.lock().await.name,
-                    // self.attackers.first().unwrap().0.lock().await.name
-                    Ulid::new()
-                );
-                player
-                    .add_stat(id, Stat::new(StatType::Health, -damage))
-                    .await;
-                {
-                    attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
-                }
+                let id = {
+                    let mut player = player_arc.lock().await;
+                    let id = format!(
+                        "damage-{}-{}",
+                        attacker_card_arc.lock().await.name,
+                        // self.attackers.first().unwrap().0.lock().await.name
+                        Ulid::new()
+                    );
+                    player.add_stat(id, Stat::new(StatType::Health, -damage));
+                    {
+                        attacker_card_arc.lock().await.damage_dealt_to_players = damage.clone();
+                    }
+                    player.name.clone()
+                };
+
                 println!(
                     "Attacker {} deals {} damage to player {}",
                     attacker_card_arc.lock().await.name,
                     damage,
-                    player.name
+                    player_arc.lock().await.name
                 );
 
                 None
             }
-            EffectTarget::Card(card_arc) => {
-                let mut card = card_arc.lock().await;
-                let toughness = card.get_stat_value(StatType::Toughness);
-                card.damage_taken += damage;
+            EffectTarget::Card(card) => {
+                let toughness = card.lock().await.get_stat_value(StatType::Toughness);
+                card.lock().await.damage_taken += damage;
                 println!(
                     "Attacker {} deals {} damage to card {}",
                     attacker_card_arc.lock().await.name,
                     damage,
-                    card.name
+                    card.lock().await.name
                 );
 
-                if card.damage_taken >= toughness {
-                    println!("Card {} is destroyed!", card.name);
-                    Some(Arc::clone(card_arc))
+                if damage >= toughness {
+                    println!("Card {} is destroyed!", card.lock().await.name);
+                    Some(Arc::clone(card))
                 } else {
+                    card.lock().await.add_stat(
+                        Ulid::new().to_string(),
+                        Stat::new(StatType::Toughness, -damage),
+                    );
                     None
                 }
             }

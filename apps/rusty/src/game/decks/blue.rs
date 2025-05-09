@@ -1,9 +1,10 @@
 use crate::game::{
     action::{
         generate_mana::GenerateManaAction, ActionTriggerType, AsyncClosureAction,
-        AsyncClosureWithCardAction, CardActionTarget, CardActionTrigger, CardRequiredTarget,
-        CardTargetTeam, CounterSpellAction, DeclareAttackerAction, DeclareBlockerAction,
-        DrawCardCardAction, PlayerActionTarget, ReturnToHandAction, TriggerTarget,
+        AsyncClosureWithCardAction, BlankAction, CardActionTarget, CardActionTrigger,
+        CardRequiredTarget, CardTargetTeam, CounterSpellAction, DeclareAttackerAction,
+        DeclareBlockerAction, DrawCardCardAction, PlayerActionTarget, ReturnToHandAction,
+        PhaseTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
@@ -22,7 +23,7 @@ use std::{f32::consts::E, future::Future, mem::zeroed, pin::Pin, sync::Arc};
 use tokio::sync::Mutex;
 use ulid::Ulid;
 
-fn create_frost_breath() -> Card {
+pub fn create_frost_breath() -> Card {
     Card::new(
         "Frost Breath",
         "Tap up to two target creatures. They don't untap during their controller's next untap step.",
@@ -49,23 +50,109 @@ fn create_frost_breath() -> Card {
     )
 }
 
-fn create_island() -> Card {
+fn create_test_island() -> Card {
     Card::new(
         "Island",
         "",
-        vec![CardActionTrigger::new(
-            ActionTriggerType::AbilityWithinPhases(
-                "Add 1 {B} to your pool".to_string(),
-                vec![],
-                None,
-                true,
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    PhaseTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
             ),
-            CardRequiredTarget::None,
-            Arc::new(GenerateManaAction {
-                mana_to_add: vec![ManaType::Blue],
-                target: PlayerActionTarget::Owner,
-            }),
-        )],
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {B} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                        ManaType::Blue,
+                    ],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
+        CardPhase::Ready,
+        CardType::BasicLand(ManaType::Blue),
+        vec![],
+        vec![],
+    )
+}
+
+pub fn create_island() -> Card {
+    Card::new(
+        "Island",
+        "",
+        vec![
+            CardActionTrigger::new(
+                ActionTriggerType::CardPlayedFromHand(Some((
+                    vec![
+                        TurnPhase::Untap,
+                        TurnPhase::Upkeep,
+                        TurnPhase::Draw,
+                        TurnPhase::Main,
+                        TurnPhase::BeginningOfCombat,
+                        TurnPhase::DeclareAttackers,
+                        TurnPhase::DeclareBlockers,
+                        TurnPhase::CombatDamage,
+                        TurnPhase::EndOfCombat,
+                        TurnPhase::Main2,
+                        TurnPhase::End,
+                        TurnPhase::Cleanup,
+                    ],
+                    PhaseTarget::Owner,
+                ))),
+                CardRequiredTarget::None,
+                Arc::new(BlankAction {}),
+            ),
+            CardActionTrigger::new(
+                ActionTriggerType::AbilityWithinPhases(
+                    "Add 1 {G} to your pool".to_string(),
+                    vec![],
+                    None,
+                    true,
+                ),
+                CardRequiredTarget::None,
+                Arc::new(GenerateManaAction {
+                    mana_to_add: vec![ManaType::Blue],
+                    target: PlayerActionTarget::Owner,
+                }),
+            ),
+        ],
         CardPhase::Ready,
         CardType::BasicLand(ManaType::Blue),
         vec![],
@@ -127,10 +214,10 @@ pub fn create_unsummon() -> Card {
 pub fn create_blue_deck() -> Vec<Card> {
     let mut deck: Vec<Card> = vec![];
     deck.append(&mut duplicate_card(create_counterspell(), 4));
-    deck.append(&mut duplicate_card(create_frost_breath(), 4));
+    // deck.append(&mut duplicate_card(create_frost_breath(), 4));
     deck.append(&mut duplicate_card(create_unsummon(), 4));
-    deck.append(&mut duplicate_card(create_divination(), 4));
-    deck.append(&mut duplicate_card(create_island(), 8));
+    // deck.append(&mut duplicate_card(create_divination(), 4));
+    deck.append(&mut duplicate_card(create_test_island(), 1));
 
     deck
 }

@@ -1,16 +1,13 @@
-pub mod black;
-pub mod blue;
-pub mod green;
-pub mod green_a;
-pub mod red;
+// pub mod black;
+// pub mod blue;
+// pub mod green;
+// pub mod green_a;
+// pub mod red;
+pub mod vegas;
 pub mod white;
 
-use black::create_black_deck;
-use blue::create_blue_deck;
-use green::{create_green_deck, create_green_deck_v2};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use red::create_red_deck;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::future::Future;
@@ -19,13 +16,13 @@ use std::sync::Arc;
 use std::vec::Vec;
 use tokio::sync::Mutex;
 use ulid::Ulid;
-use white::create_angels_deck;
+use vegas::create_vegas_deck;
+use white::{create_angels_blue_deck, create_angels_deck};
 
 use crate::game::action::generate_mana::GenerateManaAction;
 use crate::game::action::{
-    ActionTriggerType, AsyncClosureAction, AsyncClosureWithCardAction, CardActionTarget,
-    CardActionTrigger, CardRequiredTarget, CounterSpellAction, DrawCardAction, PlayerActionTarget,
-    ReturnToHandAction, TriggerTarget,
+    ActionTriggerType, AsyncClosureAction, CardActionTarget, CardActionTrigger, CardRequiredTarget,
+    CounterSpellAction, DrawCardAction, PhaseTarget, PlayerActionTarget, ReturnToHandAction,
 };
 use crate::game::card::card::create_creature_card;
 use crate::game::card::{CardPhase, CardType, CreatureType};
@@ -44,7 +41,6 @@ use super::player::Player;
 #[derive(Debug, Default)]
 pub struct Deck {
     pub draw_pile: Vec<Arc<Mutex<Card>>>,
-    pub discard_pile: Vec<Arc<Mutex<Card>>>,
     pub graveyard: Vec<Arc<Mutex<Card>>>,
     pub in_game: Vec<Arc<Mutex<Card>>>,
     pub exiled: Vec<Arc<Mutex<Card>>>,
@@ -55,6 +51,9 @@ fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
     let mut cards = Vec::new();
     for i in 0..count {
         let mut card = base_card.clone();
+        card.triggers
+            .iter_mut()
+            .for_each(|x| x.id = format!("{}-{}-{}", card.name, i, Ulid::new().to_string()));
         card.id = format!("{}-{}-{}", card.name, i, card.id);
         cards.push(card);
     }
@@ -64,12 +63,14 @@ fn duplicate_card(base_card: Card, count: usize) -> Vec<Card> {
 impl Deck {
     pub fn cards_from_selection(selection: &DeckSelector) -> Vec<Card> {
         match selection {
-            DeckSelector::Elves => create_green_deck(),
-            DeckSelector::Elves2 => create_green_deck_v2(),
-            DeckSelector::Blue => create_blue_deck(),
-            DeckSelector::Black => create_black_deck(),
-            DeckSelector::Angels => create_angels_deck(),
-            DeckSelector::Red => create_red_deck(),
+            // DeckSelector::Elves => create_green_deck(),
+            // DeckSelector::Elves2 => create_green_deck_v2(),
+            // DeckSelector::Blue => create_blue_deck(),
+            // DeckSelector::Black => create_black_deck(),
+            // DeckSelector::Angels => create_angels_deck(),
+            // DeckSelector::Red => create_red_deck(),
+            // DeckSelector::AngelsBlue => create_angels_blue_deck(),
+            DeckSelector::Vegas => create_vegas_deck(),
         }
     }
     pub fn new_from_selection(selection: &DeckSelector) -> Self {
@@ -84,7 +85,6 @@ impl Deck {
 
         Self {
             draw_pile: cards.into_iter().map(|c| Arc::new(Mutex::new(c))).collect(),
-            discard_pile: vec![],
             graveyard: vec![],
             in_game: vec![],
             exiled: vec![],
@@ -96,9 +96,14 @@ impl Deck {
     pub async fn first_shuffle(&mut self) {
         let mut deck_has_lands = false;
         for card in self.draw_pile.iter() {
-            if let CardType::BasicLand(_) = card.lock().await.card_type {
-                deck_has_lands = true;
-                break;
+            match card.lock().await.card_type {
+                // CardType::AdvancedMultiLand(_, _)
+                // | CardType::AdvancedLand(_)
+                // | CardType::BasicLand(_) => {
+                //     deck_has_lands = true;
+                //     break;
+                // }
+                _ => (),
             }
         }
 
@@ -109,11 +114,11 @@ impl Deck {
                 println!("Shuffled deck");
                 for card in self.draw_pile[self.draw_pile.len() - 7..].iter() {
                     match card.lock().await.card_type {
-                        CardType::BasicLand(_) => {
-                            has_land = true;
-                        }
-                        CardType::AdvancedLand(_) => has_land = true,
-                        CardType::AdvancedMultiLand(_, _) => has_land = true,
+                        // CardType::BasicLand(_) => {
+                        //     has_land = true;
+                        // }
+                        // CardType::AdvancedLand(_) => has_land = true,
+                        // CardType::AdvancedMultiLand(_, _) => has_land = true,
                         _ => {}
                     }
                 }

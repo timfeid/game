@@ -5,32 +5,39 @@
 		CardPhase,
 		CardType,
 		CardWithDetails,
+		Counter,
 		FrontendPileName,
 		FrontendTarget,
 		GameState,
-		ManaType
+		ManaType,
+		StatType
 	} from '@gangsta/rusty';
 	import { fly } from 'svelte/transition';
-	import ManaBubble from './mana-bubble/mana-bubble.svelte';
-	import Ability from './card/ability.svelte';
-	import { searchingForTarget, target, waitForTarget } from './game';
-	import { selectedAbility, selectFromAbilities } from '../../stores/dialog';
-	import { user } from '../../stores/access-token';
+	import ManaBubble from '../mana-bubble/mana-bubble.svelte';
+	import Ability from './ability.svelte';
+	import { searchingForTarget, target, waitForTarget } from '../game';
+	import { selectedAbility, selectFromAbilities } from '../../../stores/dialog';
+	import { user } from '../../../stores/access-token';
 	import { toast } from 'svelte-sonner';
-	import { client } from '../../client';
+	import { client } from '../../../client';
 	import { RSPCError } from '@rspc/client';
-	import ManaBubbleList from './mana-bubble/mana-bubble-list.svelte';
+	import ManaBubbleList from '../mana-bubble/mana-bubble-list.svelte';
+	import type { Snippet } from 'svelte';
+	import { manaColors } from '../../../colors';
 
-	export let cardWithDetails: CardWithDetails;
-	export let game: GameState | undefined = undefined;
-	// export let pile: FrontendPileName;
-	// export let cardWithDetails.frontend_target.card_index: number;
-	// export let playerIndex: number;
-	export let className: string = '';
-	export { className as class };
-	export let noTooltips = false;
+	interface Props {
+		cardWithDetails: CardWithDetails;
+		game?: GameState;
+		class?: string;
+		noTooltips?: boolean;
+		children?: Snippet;
+	}
 
-	$: card = cardWithDetails.card;
+	let { game, cardWithDetails, class: className, noTooltips, children }: Props = $props();
+
+	let showAttachments = true;
+
+	const card = $derived(cardWithDetails.card);
 
 	async function selectAbilityDialog(abilities: AbilityDetails[]): Promise<AbilityDetails> {
 		return await new Promise((resolve, reject) => {
@@ -71,54 +78,78 @@
 	}
 
 	// Function to display the card's stats
-	function displayStats(stats: (typeof card)['stats']) {
-		return Object.values(stats.stats).map((stat) => {
-			return `${stat.stat_type}: ${stat.intensity}`;
-		});
+	// function displayStats(stats: (typeof card)['stats']) {
+	// 	return Object.values(stats.stats).map((stat) => {
+	// 		return `${stat.stat_type}: ${stat.intensity}`;
+	// 	});
+	// }
+
+	function displayOtherStats(stats: (typeof cardWithDetails)['stats']) {
+		return Object.entries(stats).filter((stat) => stat[0] !== 'Power' && stat[0] !== 'Toughness');
 	}
 
-	function displayOtherStats(stats: (typeof card)['stats']) {
-		return Object.values(stats.stats).filter(
-			(stat) =>
-				stat.stat_type !== 'Power' && stat.stat_type !== 'Toughness' && stat.stat_type !== 'Counter'
-		);
-	}
-
-	let damage = 0;
-	let defense = 0;
-	function extractDamageAndDefense(stats: (typeof card)['stats']) {
-		damage = 0;
-		defense = 0;
-		for (let stat of Object.values(stats.stats)) {
-			if (stat.stat_type === 'Power') {
-				damage += stat.intensity;
-			} else if (stat.stat_type === 'Toughness') {
-				defense += stat.intensity;
+	let damage = $state(0);
+	let defense = $state(0);
+	function extractDamageAndDefense(stats: (typeof cardWithDetails)['stats']) {
+		let p = 0;
+		let t = 0;
+		for (let stat of Object.entries(stats)) {
+			if (stat[0] === 'Power') {
+				p += stat[1];
+			} else if (stat[0] === 'Toughness') {
+				t += stat[1];
 			}
 		}
+		damage = p;
+		defense = t;
 	}
 
-	$: {
+	$effect(() => {
 		if (card) {
-			extractDamageAndDefense(card.stats);
+			extractDamageAndDefense(cardWithDetails.stats);
 		}
-	}
+	});
 
 	function isAdvancedLand(cardType: CardType): cardType is { AdvancedLand: ManaType } {
 		return typeof cardType !== 'string' && 'AdvancedLand' in cardType;
+	}
+
+	function isMultiLand(
+		cardType: CardType
+	): cardType is { AdvancedMultiLand: [ManaType, ManaType] } {
+		return typeof cardType !== 'string' && 'AdvancedMultiLand' in cardType;
 	}
 
 	function isBasicLand(cardType: CardType): cardType is { BasicLand: ManaType } {
 		return typeof cardType !== 'string' && 'BasicLand' in cardType;
 	}
 
-	$: manaType = isBasicLand(card.card_type)
-		? card.card_type.BasicLand
-		: isAdvancedLand(card.card_type)
-			? card.card_type.AdvancedLand
-			: null;
+	// $: manaType = isBasicLand(card.card_type)
+	// 	? card.card_type.BasicLand
+	// 	: isAdvancedLand(card.card_type)
+	// 		? card.card_type.AdvancedLand
+	// 		: null;
+
+	let manaTypeOne: string | null = $state(null);
+	let manaTypeTwo: string | null = $state(null);
+	$effect(() => {
+		manaTypeOne = null;
+		manaTypeTwo = null;
+		if (card) {
+			if (isMultiLand(card.card_type)) {
+				[manaTypeOne, manaTypeTwo] = card.card_type.AdvancedMultiLand;
+			} else if (isAdvancedLand(card.card_type)) {
+				manaTypeOne = card.card_type.AdvancedLand;
+				manaTypeTwo = card.card_type.AdvancedLand;
+			} else if (isBasicLand(card.card_type)) {
+				manaTypeOne = card.card_type.BasicLand;
+				manaTypeTwo = card.card_type.BasicLand;
+			}
+		}
+	});
 
 	async function actionCard() {
+		console.log(cardWithDetails.abilities);
 		if ($searchingForTarget) {
 			console.log('set target.');
 			target.set({ Card: cardWithDetails.frontend_target });
@@ -130,7 +161,6 @@
 		if (game) {
 			if ($user?.sub === cardWithDetails.frontend_target.player_id) {
 				try {
-					console.log(cardWithDetails.abilities);
 					const ability = await selectAbility(cardWithDetails);
 					if (!ability) {
 						const maybeAbilities = cardWithDetails.abilities.filter(
@@ -138,7 +168,7 @@
 						);
 						if (maybeAbilities.length) {
 							throw new Error(
-								`Not enough mana to cast ${maybeAbilities[0].action_type} for ${card.name}`
+								`Not enough mana to cast ${maybeAbilities[0].description} for ${card.name}`
 							);
 						}
 						throw new Error('This card has no ability right now.');
@@ -156,7 +186,7 @@
 	async function executeAction(target: FrontendTarget | null, ability: AbilityDetails) {
 		try {
 			await client.mutation([
-				ability.action_type === 'Attach' ? 'lobby.attach_card' : 'lobby.action_card',
+				'lobby.action_card',
 				{
 					code: game!.code,
 					card: cardWithDetails.frontend_target,
@@ -172,19 +202,30 @@
 		}
 	}
 
-	$: shownAbilities = cardWithDetails.abilities.filter((a) => a.show);
+	const shownAbilities = $derived(cardWithDetails.abilities.filter((a) => a.show));
+
+	function getCounterKey(counter: Counter) {
+		if ('PowerToughnessModifier' in counter) {
+			return `${counter.PowerToughnessModifier[0]}/${counter.PowerToughnessModifier[1]}`;
+		}
+	}
 </script>
 
 <button
-	on:click={actionCard}
-	class:rotate-90={card.tapped}
-	class:scale-75={card.tapped}
-	class="flex flex-col text-xs card relative w-[215px] h-[300px] transition duration-300 font-serif {className}"
+	onclick={actionCard}
+	class:opacity-50={card.tapped}
+	class:has-attachments={children}
+	class="flex flex-col text-xs card relative w-[180px] h-[180px] transition duration-300 font-serif {className}"
 	data-card-index={cardWithDetails.frontend_target.card_index}
 	data-pile={cardWithDetails.frontend_target.pile}
 	data-player-id={cardWithDetails.frontend_target.player_id}
 	in:fly={{ y: '-300%', duration: 500 }}
 >
+	{#if children}
+		<div class="attachment-wrapper" transition:fly={{ y: 100, duration: 300 }}>
+			{@render children()}
+		</div>
+	{/if}
 	<div
 		class:defending={game?.public_info.blocks.find(
 			(a) =>
@@ -202,23 +243,21 @@
 		)}
 	></div>
 	<div
-		class="relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
+		class="card-main relative overflow-hidden rounded-xl border-[3px] dark:border-gray-700/40 border-gray-300/40 bg-gray-100 dark:bg-gray-950 w-full h-full"
+		style="--mana-color: {manaTypeOne
+			? manaColors[manaTypeOne.toLowerCase()]
+			: 'transparent'}; --mana-color-2: {manaTypeTwo
+			? manaColors[manaTypeTwo.toLowerCase()]
+			: 'transparent'}"
 	>
 		<div
-			class="card-header flex items-center justify-between w-full py-0.5 px-2 w-full"
-			class:bg-green-200={manaType === 'Green'}
-			class:bg-blue-200={manaType === 'Blue'}
-			class:bg-black={manaType === 'Black'}
-			class:bg-white={manaType === 'White'}
-			class:text-white={manaType === 'Black'}
-			class:text-black={manaType === 'White'}
-			class:dark:bg-green-800={manaType === 'Green'}
-			class:dark:bg-blue-800={manaType === 'Blue'}
-			class:dark:bg-black={manaType === 'Black'}
-			class:dark:bg-white={manaType === 'White'}
+			class="card-header flex items-center justify-between w-full py-0.5 px-2 bg-gradient-to-br from-[var(--mana-color)]
+		to-[var(--mana-color-2)]"
 		>
 			<h2 class="text-xs leading-6 font-bold truncate">
 				{card.name}
+				{manaTypeOne}
+				{manaTypeTwo}
 			</h2>
 			<ManaBubbleList mana={card.cost} />
 		</div>
@@ -232,6 +271,8 @@
 					{card.card_type}
 				{:else if isBasicLand(card.card_type)}
 					Basic Land
+				{:else if isMultiLand(card.card_type)}
+					Land
 				{:else if isAdvancedLand(card.card_type)}
 					Land
 				{/if}
@@ -242,14 +283,18 @@
 				</div>
 			{:else if card.card_type === 'Planeswalker'}
 				<div class="ml-auto">
-					{Object.values(card.stats.stats).find((x) => x.stat_type === 'Counter')?.intensity}
+					{Object.entries(cardWithDetails.incremental_counters)
+						.find((x) => {
+							return x[0] === 'plainswalker';
+						})
+						?.at(1)}
 				</div>
 			{/if}
 		</div>
 
 		<div class="text-xs text-left px-2">
 			<ul class="flex space-x-2 text-gray-700 dark:text-gray-300 uppercase font-semibold">
-				{#each displayOtherStats(card.stats) as stat}
+				{#each displayOtherStats(cardWithDetails.stats) as stat}
 					{#each Object.keys(stat) as key}
 						{#if key != 'intensity'}
 							<li>
@@ -279,15 +324,22 @@
 			{#if card.card_type === 'Creature' && Object.values(card.counters).length > 0}
 				<div class=" text-muted">Counters</div>
 				<div class="flex space-x-2">
+					{#each Object.entries(cardWithDetails.incremental_counters) as [key, count]}
+						<div>
+							{count}x {key}
+						</div>
+					{/each}
 					{#each Object.entries(Object.values(card.counters).reduce((acc, counter) => {
-							const key = `${counter.PowerToughnessModifier[0]}/${counter.PowerToughnessModifier[1]}`;
-							if (!acc[key]) {
-								acc[key] = 1;
-							} else {
-								acc[key]++;
-							}
-							return acc;
-						}, {})) as [key, count]}
+								const key = getCounterKey(counter);
+								if (key) {
+									if (!acc[key]) {
+										acc[key] = 1;
+									} else {
+										acc[key]++;
+									}
+								}
+								return acc;
+							}, {} as Record<string, number>)) as [key, count]}
 						<div>
 							{count}x {key}
 						</div>
@@ -320,6 +372,23 @@
 		100% {
 			opacity: 0.8;
 		}
+	}
+
+	button:hover > .card-main {
+		transform: scale(1.05);
+	}
+
+	button:hover > .attachment-wrapper {
+		transform: translateX(0);
+		opacity: 1;
+	}
+
+	.card-main {
+		position: relative;
+		overflow: hidden;
+		border-radius: 10px;
+		border: 3px solid gray;
+		transition: transform 0.2s ease;
 	}
 
 	.defending {
@@ -393,5 +462,32 @@
 	.attacking::after {
 		filter: blur(20px);
 		animation-duration: 7s;
+	}
+	.has-attachments {
+		border-color: red !important;
+		box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+		animation: pulse 2s infinite alternate;
+	}
+	.attachment-wrapper {
+		position: absolute;
+		top: 0;
+		left: 100%;
+		transform: translateX(-100%);
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		opacity: 0;
+		transition:
+			transform 0.3s ease,
+			opacity 0.3s ease;
+	}
+
+	@keyframes pulse {
+		0% {
+			box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+		}
+		100% {
+			box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+		}
 	}
 </style>

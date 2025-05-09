@@ -9,7 +9,7 @@
 	import ManaBubble from './mana-bubble/mana-bubble.svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import Card from './Card.svelte';
+	import Card from './card/playing-card.svelte';
 
 	export let game_state: GameState;
 	export let join_code: string;

@@ -1,27 +1,33 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::vec;
 use std::{borrow::Borrow, cell::RefCell};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use textwrap::fill;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard, TryLockError};
 use ulid::Ulid;
 
 use crate::error::AppError;
 use crate::game::action;
 use crate::game::effects::{EffectManager, EffectTarget};
+use crate::lobby::manager::AbilityDetails;
 
+use super::action::generate_mana::GenerateManaAction;
 use super::action::{
-    ActionTriggerType, Attachable, CardAction, CardActionTarget, CardActionTrigger,
-    CardActionWrapper, CardRequiredTarget, PlayerAction, PlayerActionTrigger, ResetCardAction,
+    ActionBuilder, ActionTriggerType, Attachable, CardAction, CardActionTarget, CardActionTrigger,
+    CardActionWrapper, CardRequiredTarget, DeclareAttackerAction, DeclareBlockerAction,
+    PhaseTarget, PlayCardAction, PlayerAction, PlayerActionTrigger, ResetCardAction,
 };
 
 use super::effects::{EffectID, ExpireContract, StatModifierEffect};
 use super::mana::ManaType;
-use super::player;
+use super::player::CardPosition;
 use super::turn::Turn;
 use super::{
     action::Action,
@@ -30,6 +36,7 @@ use super::{
     turn::TurnPhase,
     Game,
 };
+use super::{player, ActionType, FrontendTarget};
 
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Type)]
 pub enum CreatureType {
@@ -46,18 +53,18 @@ pub enum CardType {
     Instant,
     Sorcery,
     Artifact,
-    BasicLand(ManaType),
-    AdvancedLand(ManaType),
-    AdvancedMultiLand(ManaType, ManaType),
+    // BasicLand(ManaType),
+    // AdvancedLand(ManaType),
+    // AdvancedMultiLand(ManaType, ManaType),
     // Land(Vec<ManaType>),
 }
 
 impl CardType {
     pub fn is_spell(&self) -> bool {
         match self {
-            CardType::BasicLand(_) => false,
-            CardType::AdvancedLand(_) => false,
-            CardType::AdvancedMultiLand(_, _) => false,
+            // CardType::BasicLand(_) => false,
+            // CardType::AdvancedLand(_) => false,
+            // CardType::AdvancedMultiLand(_, _) => false,
             // CardType::Land(_) => false,
             _ => true,
         }
@@ -70,25 +77,193 @@ pub enum CardPhase {
     Ready,
     Complete,
     Cancelled,
-    Exiled,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Hash, Type)]
 pub enum Counter {
     PowerToughnessModifier(i16, i16),
-    Incremental(i16),
+    Incremental(String, i16),
 }
 
-#[derive(Type, Debug, Deserialize, Serialize, Clone)]
+pub struct CardBuilder {
+    name: String,
+    description: String,
+    actions: Vec<CardActionTrigger>,
+    mana_cost: Vec<ManaType>,
+    card_type: CardType,
+    phase: CardPhase,
+    stats: Vec<Stat>,
+    creature_type: Option<CreatureType>,
+    play_restrictions: Option<(Vec<TurnPhase>, PhaseTarget)>,
+    play_requirements: Option<
+        Arc<
+            dyn Fn(
+                    Arc<Mutex<Game>>,
+                    Arc<Mutex<Card>>,
+                    Option<String>,
+                ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
+    play_target: CardRequiredTarget,
+}
+
+impl CardBuilder {
+    pub fn new() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            actions: vec![],
+            mana_cost: vec![],
+            card_type: CardType::Sorcery,
+            phase: CardPhase::Ready,
+            stats: vec![],
+            creature_type: None,
+            play_restrictions: Some((vec![TurnPhase::Main, TurnPhase::Main2], PhaseTarget::Owner)),
+            play_requirements: None,
+            play_target: CardRequiredTarget::None,
+        }
+    }
+
+    pub fn name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
+    }
+
+    pub fn play_target(mut self, target: CardRequiredTarget) -> Self {
+        self.play_target = target;
+        self
+    }
+
+    pub fn description(mut self, description: &str) -> Self {
+        self.description = description.to_string();
+        self
+    }
+
+    pub fn add_action(mut self, action: ActionBuilder) -> Self {
+        self.actions.push(action.build());
+        self
+    }
+
+    pub fn play_restrictions(mut self, phases: Vec<TurnPhase>, player: PhaseTarget) -> Self {
+        self.play_restrictions = Some((phases, player));
+        self
+    }
+
+    pub fn play_requirements<F>(mut self, requirements: F) -> Self
+    where
+        F: Fn(
+                Arc<Mutex<Game>>,
+                Arc<Mutex<Card>>,
+                Option<String>,
+            ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+            + 'static
+            + Send
+            + Sync,
+    {
+        self.play_requirements = Some(Arc::new(requirements));
+        self
+    }
+
+    pub fn mana_cost(mut self, mana: Vec<ManaType>) -> Self {
+        self.mana_cost = mana;
+        self
+    }
+
+    pub fn card_type(mut self, card_type: CardType) -> Self {
+        match &card_type {
+            CardType::Instant => self.play_restrictions = None,
+            _ => {}
+        }
+        self.card_type = card_type;
+        self
+    }
+
+    pub fn phase(mut self, phase: CardPhase) -> Self {
+        self.phase = phase;
+        self
+    }
+
+    pub fn build(self) -> Card {
+        Card::new(
+            &self.name,
+            &self.description,
+            self.actions,
+            self.phase,
+            self.card_type,
+            self.stats,
+            self.mana_cost,
+            self.play_restrictions,
+            self.play_requirements,
+            self.play_target,
+        )
+    }
+
+    pub fn creature(mut self, power: i16, toughness: i16) -> Self {
+        self.stats.push(Stat::new(StatType::Power, power));
+        self.stats.push(Stat::new(StatType::Toughness, toughness));
+        self = self.phase(CardPhase::Charging(1));
+        self = self.card_type(CardType::Creature);
+        self = self.add_action(
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Attack".to_string(),
+                vec![],
+                Some((vec![TurnPhase::DeclareAttackers], PhaseTarget::Owner)),
+                true,
+                CardRequiredTarget::EnemyCardOrPlayer,
+            ))
+            .action(DeclareAttackerAction {}),
+        );
+        self = self.add_action(
+            ActionBuilder::new(ActionTriggerType::AbilityWithinPhases(
+                "Block".to_string(),
+                vec![],
+                Some((vec![TurnPhase::DeclareBlockers], PhaseTarget::Any)),
+                false,
+                CardRequiredTarget::EnemyCardInCombat,
+            ))
+            .action(DeclareBlockerAction {})
+            .requirements(|game, source, owner, ability_id| {
+                Box::pin(async move {
+                    if let Ok((Some(position), target)) =
+                        Game::frontend_target_from_card(&game, &source).await
+                    {
+                        return position == CardPosition::Frontline;
+                    }
+                    false
+                })
+            }),
+        );
+
+        self
+    }
+
+    pub fn creature_of_type(
+        mut self,
+        power: i16,
+        toughness: i16,
+        creature_type: CreatureType,
+    ) -> Self {
+        self = self.creature(power, toughness);
+        self.creature_type = Some(creature_type);
+
+        self
+    }
+}
+
+#[derive(Type, Deserialize, Serialize, Clone)]
 pub struct Card {
+    pub play_restrictions: Option<(Vec<TurnPhase>, PhaseTarget)>,
     pub creature_type: Option<CreatureType>,
     pub name: String,
     pub description: String,
     pub card_type: CardType,
     pub current_phase: CardPhase,
     #[serde(skip_serializing, skip_deserializing)]
-    pub target: Option<EffectTarget>,
+    pub target: Option<FrontendTarget>,
     pub tapped: bool,
+    #[serde(skip_serializing, skip_deserializing)]
     pub stats: StatManager,
     #[serde(skip_serializing, skip_deserializing)]
     pub triggers: Vec<CardActionTrigger>,
@@ -98,17 +273,357 @@ pub struct Card {
     #[serde(skip_serializing, skip_deserializing)]
     pub attached: Option<Arc<Mutex<Card>>>,
     #[serde(skip_serializing, skip_deserializing)]
-    pub action_target: Option<EffectTarget>,
-    #[serde(skip_serializing, skip_deserializing)]
     pub damage_dealt_to_players: i16,
     #[serde(skip_serializing, skip_deserializing)]
     pub damage_taken: i16,
     pub is_countered: bool,
     pub id: String,
     pub counters: HashMap<String, Counter>,
+    pub play_target: CardRequiredTarget,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    pub play_requirements: Option<
+        Arc<
+            dyn Fn(
+                    Arc<Mutex<Game>>,
+                    Arc<Mutex<Card>>,
+                    Option<String>,
+                ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
+}
+
+impl Debug for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Card")
+            .field("play_restrictions", &self.play_restrictions)
+            .field("creature_type", &self.creature_type)
+            .field("name", &self.name)
+            .field("description", &self.description)
+            .field("card_type", &self.card_type)
+            .field("current_phase", &self.current_phase)
+            .field("target", &self.target)
+            .field("tapped", &self.tapped)
+            .field("stats", &self.stats)
+            .field("triggers", &self.triggers)
+            .field("cost", &self.cost)
+            .field("owner", &self.owner)
+            .field("attached", &self.attached)
+            .field("damage_dealt_to_players", &self.damage_dealt_to_players)
+            .field("damage_taken", &self.damage_taken)
+            .field("is_countered", &self.is_countered)
+            .field("id", &self.id)
+            .field("counters", &self.counters)
+            .finish()
+    }
 }
 
 impl Card {
+    pub fn get_incremental_counters(&self) -> HashMap<String, i16> {
+        let mut counter_sums = HashMap::new();
+
+        for counter in self.counters.values() {
+            if let Counter::Incremental(key, value) = counter {
+                *counter_sums.entry(key.clone()).or_insert(0) += value;
+                if counter_sums.get(key) == Some(&0) {
+                    counter_sums.remove(key);
+                }
+            }
+        }
+
+        counter_sums
+    }
+
+    pub async fn abilities(
+        &self,
+        turn_phase: TurnPhase,
+        in_play: bool,
+        game: Option<(Arc<Mutex<Card>>, Arc<Mutex<Game>>)>,
+        // game_arc: Option<Arc<Mutex<Game>>>,
+    ) -> Vec<AbilityDetails> {
+        let mut abilities = vec![];
+        // if self.current_phase == CardPhase::Exiled {
+        //     return abilities;
+        // }
+
+        for trigger in self.triggers.iter() {
+            match &trigger.trigger_type {
+                // action::ActionTriggerType::CardTapped => {
+                //     return (trigger.card_required_target.clone(), ActionType::Tap)
+                // }
+                // action::ActionTriggerType::CardTappedWithinPhases(allowed_phases) => {
+                //     if allowed_phases.contains(&turn_phase) {
+                //         return (trigger.card_required_target.clone(), ActionType::Tap);
+                //     }
+                // }
+                // action::ActionTriggerType::CardEnteredBattlefield => {
+                //     let mut is_owner = !in_play;
+
+                //     if let Some(game) = &game_arc {
+                //         is_owner = Arc::ptr_eq(
+                //             &self.owner.clone().unwrap(),
+                //             &game
+                //                 .try_lock()
+                //                 .expect("Unable to grab game")
+                //                 .current_turn
+                //                 .as_ref()
+                //                 .unwrap()
+                //                 .current_player,
+                //         );
+                //     }
+                //     let within_phase = restrictions
+                //         .as_ref()
+                //         .and_then(|(phase, trigger_target)| {
+                //             Some(
+                //                 phase.contains(&turn_phase)
+                //                     && match trigger_target {
+                //                         PhaseTarget::Owner => is_owner,
+                //                         PhaseTarget::Opponent => !is_owner,
+                //                         PhaseTarget::Any => true,
+                //                     },
+                //             )
+                //         })
+                //         .unwrap_or(true);
+
+                //     let mut meets_requirements_except_mana = within_phase && !in_play;
+                //     if let Some(game_arc) = &game_arc {
+                //         if let Some(card) = &original_card_arc {
+                //             if let Ok(game) = game_arc.try_lock() {
+                //                 if let Ok(card) = card.try_lock() {
+                //                     meets_requirements_except_mana = meets_requirements_except_mana
+                //                         && (&trigger.requirements)(
+                //                             &game,
+                //                             &card,
+                //                             Some(trigger.id.clone()),
+                //                         );
+                //                 }
+                //             }
+                //         }
+                //     }
+                //     let mut meets_mana_requirements = false;
+                //     let mut can_pay_mana = false;
+                //     let mut player_id = None;
+
+                //     if let Some(owner) = &self.owner {
+                //         if let Ok(owner) = owner.try_lock() {
+                //             meets_mana_requirements = owner.has_required_mana(&self.cost);
+                //             can_pay_mana = owner.can_pay_mana(&self.cost);
+                //             player_id = Some(owner.name.clone());
+                //         }
+                //     }
+
+                //     added_play_from_hand_action = true;
+                //     if let Some(card) = &original_card_arc {
+                //         abilities.push(AbilityDetails {
+                //             id: "play_card".to_string(),
+                //             action_type: ActionType::PlayedCard,
+                //             mana_cost: vec![],
+                //             required_target: trigger.card_required_target.clone(),
+                //             description: "Play".to_string(),
+                //             show: false,
+                //             meets_requirements_except_mana,
+                //             meets_mana_requirements,
+                //             can_pay_mana,
+                //             owner_player_id: player_id,
+                //             tap_required: false,
+                //             action: Some(Arc::new(PlayCardAction {})),
+                //         });
+                //     }
+                // }
+                action::ActionTriggerType::Attached => {
+                    let mut player_id = None;
+
+                    if let Some(owner) = &self.owner {
+                        player_id = Some(owner.lock().await.name.clone());
+                    }
+
+                    if &turn_phase == &TurnPhase::Main {
+                        abilities.push(AbilityDetails {
+                            id: trigger.id.clone(),
+                            mana_cost: vec![],
+                            required_target: trigger.card_required_target.clone(),
+                            description: "Attach".to_string(),
+                            show: in_play,
+                            meets_requirements_except_mana: in_play,
+                            meets_mana_requirements: true,
+                            can_pay_mana: true,
+                            owner_player_id: player_id.clone(),
+                            tap_required: false,
+                            action: Some(trigger.action.clone()),
+                        });
+                    }
+                }
+
+                action::ActionTriggerType::AbilityWithinPhases(
+                    description,
+                    required_mana,
+                    phase_restrictions,
+                    required_tap,
+                    required_target,
+                ) => {
+                    let mut is_owner = false;
+                    if let Some((_, game)) = &game {
+                        if let Some(current_player) = game
+                            .lock()
+                            .await
+                            .current_turn
+                            .as_ref()
+                            .map(|t| t.current_player.clone())
+                        {
+                            is_owner = Arc::ptr_eq(self.owner.as_ref().unwrap(), &current_player);
+                        }
+                    }
+                    let main_phase_restriction = phase_restrictions
+                        .as_ref()
+                        .and_then(|(phase, trigger_target)| {
+                            Some(
+                                phase.contains(&TurnPhase::Main)
+                                    || phase.contains(&TurnPhase::Main2),
+                            )
+                        })
+                        .unwrap_or(false);
+                    let within_phase = phase_restrictions
+                        .as_ref()
+                        .and_then(|(phase, trigger_target)| {
+                            Some(
+                                phase.contains(&turn_phase)
+                                    && match trigger_target {
+                                        PhaseTarget::Owner => is_owner,
+                                        PhaseTarget::Opponent => !is_owner,
+                                        PhaseTarget::Any => true,
+                                    },
+                            )
+                        })
+                        .unwrap_or(true);
+
+                    let can_pay_mana = if let Some(owner) = self.owner.as_ref() {
+                        if let Some((card, _)) = game.clone() {
+                            owner.lock().await.can_pay_mana(required_mana).await
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    let player_id = if let Some(owner) = self.owner.as_ref() {
+                        Some(owner.lock().await.name.clone())
+                    } else {
+                        None
+                    };
+
+                    let meets_mana_requirements = if let Some(owner) = self.owner.as_ref() {
+                        owner.lock().await.has_required_mana(required_mana)
+                    } else {
+                        false
+                    };
+
+                    // if can_pay_mana && within_phase {
+                    let mut meets_requirements_except_mana = within_phase
+                        && in_play
+                        && ((!self.tapped && self.current_phase == CardPhase::Ready)
+                            || !required_tap);
+
+                    if let Some((card, game)) = game.clone() {
+                        // println!("{}: {:?}", self.name, card);
+                        meets_requirements_except_mana = meets_requirements_except_mana
+                            && (&trigger.requirements)(
+                                game,
+                                card,
+                                self.owner.clone().unwrap(),
+                                Some(trigger.id.clone()),
+                            )
+                            .await;
+                    }
+
+                    abilities.push(AbilityDetails {
+                        id: trigger.id.clone(),
+                        mana_cost: required_mana.clone(),
+                        required_target: required_target.clone(),
+                        description: description.to_string(),
+                        show: meets_requirements_except_mana
+                            || phase_restrictions.is_none()
+                            || main_phase_restriction,
+                        meets_requirements_except_mana,
+                        meets_mana_requirements,
+                        can_pay_mana,
+                        owner_player_id: player_id,
+                        tap_required: required_tap.clone(),
+                        action: Some(trigger.action.clone()),
+                    });
+
+                    // return (trigger.card_required_target.clone(), action_type);
+                    // }
+                }
+                x => {}
+            }
+        }
+
+        if !in_play {
+            let mut meets_mana_requirements = false;
+            let mut can_pay_mana = false;
+            let mut player_id = None;
+            let mut is_owner = !in_play;
+
+            if let Some((_card, game)) = &game {
+                is_owner = Arc::ptr_eq(
+                    &self.owner.clone().unwrap(),
+                    &game
+                        .lock()
+                        .await
+                        .current_turn
+                        .as_ref()
+                        .unwrap()
+                        .current_player,
+                );
+            }
+
+            let within_phase = self
+                .play_restrictions
+                .clone()
+                .and_then(|(phase, trigger_target)| {
+                    Some(
+                        phase.contains(&turn_phase)
+                            && match trigger_target {
+                                PhaseTarget::Owner => is_owner,
+                                PhaseTarget::Opponent => !is_owner,
+                                PhaseTarget::Any => true,
+                            },
+                    )
+                })
+                .unwrap_or(true);
+            let id = "play_card".to_string();
+            let mut meets_requirements_except_mana = within_phase;
+            if let Some(requirements) = &self.play_requirements {
+                if let Some((card, game)) = game.clone() {
+                    meets_requirements_except_mana = meets_requirements_except_mana
+                        && (requirements)(game, card, Some(id.clone())).await
+                }
+            }
+            if let Some(owner) = &self.owner {
+                meets_mana_requirements = owner.lock().await.has_required_mana(&self.cost);
+                // can_pay_mana = owner.lock().await.can_pay_mana(&self.cost).await;
+                player_id = Some(owner.lock().await.name.clone());
+            }
+            abilities.push(AbilityDetails {
+                id: id.clone(),
+                mana_cost: vec![],
+                required_target: self.play_target.clone(),
+                description: "Play".to_string(),
+                show: false,
+                meets_requirements_except_mana,
+                meets_mana_requirements,
+                can_pay_mana: false,
+                owner_player_id: player_id,
+                tap_required: false,
+                action: Some(Arc::new(PlayCardAction {})),
+            });
+        }
+
+        abilities
+    }
     pub fn new(
         name: &str,
         description: &str,
@@ -117,6 +632,19 @@ impl Card {
         card_type: CardType,
         stats: Vec<Stat>,
         cost: Vec<ManaType>,
+        play_restrictions: Option<(Vec<TurnPhase>, PhaseTarget)>,
+        play_requirements: Option<
+            Arc<
+                dyn Fn(
+                        Arc<Mutex<Game>>,
+                        Arc<Mutex<Card>>,
+                        Option<String>,
+                    ) -> Pin<Box<dyn Future<Output = bool> + Send>>
+                    + Send
+                    + Sync,
+            >,
+        >,
+        play_target: CardRequiredTarget,
     ) -> Self {
         let mut card = Self {
             id: Ulid::new().to_string(),
@@ -132,11 +660,13 @@ impl Card {
             cost,
             owner: None,
             attached: None,
-            action_target: None,
             damage_taken: 0,
             damage_dealt_to_players: 0,
             is_countered: false,
             counters: HashMap::new(),
+            play_restrictions,
+            play_requirements,
+            play_target,
         };
 
         card
@@ -145,12 +675,6 @@ impl Card {
     pub async fn add_counter(card: Arc<Mutex<Self>>, game: &Arc<Mutex<Game>>, counter: Counter) {
         let id = Card::activate_counter(card.clone(), &counter, game).await;
         card.lock().await.counters.insert(id, counter);
-        let mut actions = game
-            .lock()
-            .await
-            .collect_card_stat_changed_actions(&card)
-            .await;
-        game.lock().await.execute_actions(&mut actions).await.ok();
     }
 
     pub async fn activate_counter(
@@ -161,39 +685,33 @@ impl Card {
         let id = Ulid::new().to_string();
         match counter {
             Counter::PowerToughnessModifier(power, toughness) => {
-                let mut game = game.lock().await;
-                game.effect_manager.add_effect(
-                    EffectID(format!("counter-{}-toughness", id)),
-                    Arc::new(Mutex::new(StatModifierEffect::new(
+                Game::apply_effect(
+                    &game,
+                    StatModifierEffect::new(
+                        format!("counter-{}-power", id),
+                        EffectTarget::Card(card.clone()),
+                        StatType::Power,
+                        2,
+                        ExpireContract::Turns(1),
+                        None,
+                    ),
+                )
+                .await;
+                Game::apply_effect(
+                    &game,
+                    StatModifierEffect::new(
+                        format!("counter-{}-toughness", id),
                         EffectTarget::Card(card.clone()),
                         StatType::Toughness,
-                        toughness.clone(),
-                        ExpireContract::Never,
+                        2,
+                        ExpireContract::Turns(1),
                         None,
-                    ))),
-                );
-                game.effect_manager.add_effect(
-                    EffectID(format!("counter-{}-power", id)),
-                    Arc::new(Mutex::new(StatModifierEffect::new(
-                        EffectTarget::Card(card),
-                        StatType::Power,
-                        power.clone(),
-                        ExpireContract::Never,
-                        None,
-                    ))),
-                );
+                    ),
+                )
+                .await;
                 println!("applied power toughness counter!");
             }
-            Counter::Incremental(total) => {
-                card.lock()
-                    .await
-                    .modify_stat(StatType::Counter, total.clone())
-                    .await;
-                // card.lock().await.add_stat(
-                //     Ulid::new().to_string(),
-                //     Stat::new(StatType::Counter, total.clone()),
-                // );
-            }
+            Counter::Incremental(name, total) => {}
         }
         id
     }
@@ -203,7 +721,7 @@ impl Card {
             .triggers
             .iter()
             .filter(|t| match &t.trigger_type {
-                ActionTriggerType::AbilityWithinPhases(_, _, _, _) => true,
+                ActionTriggerType::AbilityWithinPhases(_, _, _, _, _) => true,
                 ActionTriggerType::PhaseStarted(vec, trigger_target) => true,
                 ActionTriggerType::CreatureTypeCardPlayed(trigger_target, creature_type) => true,
                 ActionTriggerType::Attached => true,
@@ -211,19 +729,22 @@ impl Card {
                 ActionTriggerType::OtherCardPlayed(_) => true,
                 ActionTriggerType::OtherCardDestroyed(_) => true,
                 ActionTriggerType::CardExiled => true,
-                ActionTriggerType::HealthGained => true,
+                ActionTriggerType::PlayerStatChanged(_) => true,
                 ActionTriggerType::CardStatChanged => true,
                 ActionTriggerType::OtherCardExiled(trigger_target) => true,
+                ActionTriggerType::CardAttacked => true,
+                ActionTriggerType::OtherCardDrawn(phase_target) => true,
 
-                ActionTriggerType::CardPlayedFromHand(_) => false,
-                ActionTriggerType::Continuous => false,
+                ActionTriggerType::CardEnteredBattlefield => false,
+                ActionTriggerType::Omnipresent => false,
                 ActionTriggerType::Detached => false,
                 ActionTriggerType::CardDestroyed => false,
+                ActionTriggerType::Instant => false,
             })
             .count()
             > 0;
 
-        !has_triggers && !has_effects
+        !has_triggers && !has_effects && self.attached.is_none()
     }
 
     // pub fn collect_phase_based_actions_sync(
@@ -280,7 +801,7 @@ impl Card {
     pub async fn collect_attach_actions(
         &self,
         card_arc: Arc<Mutex<Card>>,
-        target: Option<EffectTarget>,
+        target: Option<FrontendTarget>,
     ) -> Vec<Arc<dyn Action + Send + Sync>> {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
@@ -301,92 +822,148 @@ impl Card {
         actions
     }
 
-    pub async fn collect_manual_actions_old(
-        &self,
-        card_arc: Arc<Mutex<Card>>,
-        turn_phase: TurnPhase,
-        target: Option<EffectTarget>,
-    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool) {
-        let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
-        let mut requires_tap = false;
-
-        for action_trigger in &self.triggers {
-            match &action_trigger.trigger_type {
-                ActionTriggerType::AbilityWithinPhases(
-                    _,
-                    mana_requirements,
-                    phase_restrictions,
-                    tap_required,
-                ) => {
-                    let in_phases = phase_restrictions.is_none()
-                        || phase_restrictions.as_ref().unwrap().0.contains(&turn_phase);
-
-                    if in_phases {
-                        requires_tap = tap_required.clone();
-                        actions.push(Arc::new(CardActionWrapper {
-                            card: Arc::clone(&card_arc),
-                            action: action_trigger.action.clone(),
-                            target: target.clone(),
-                            ability_id: Some(action_trigger.id.clone()),
-                        }));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        (actions, requires_tap)
-    }
-
     pub async fn collect_manual_actions(
         card_arc: Arc<Mutex<Card>>,
-        turn_phase: TurnPhase,
-        target: Option<EffectTarget>,
+        in_play: bool,
+        target: Option<FrontendTarget>,
         trigger_id: String,
-        game: Arc<Mutex<Game>>,
-    ) -> (Vec<Arc<dyn Action + Send + Sync>>, bool, Vec<ManaType>) {
+        game: &Arc<Mutex<Game>>,
+    ) -> Result<
+        (
+            Vec<Arc<dyn Action + Send + Sync>>,
+            bool,
+            Vec<ManaType>,
+            ActionType,
+        ),
+        String,
+    > {
         let mut actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
         let mut requires_tap = false;
         let mut mana_requirements: Vec<ManaType> = vec![];
+        let turn_phase = game.lock().await.current_phase();
 
-        let triggers = { card_arc.lock().await.triggers.clone() };
-        for action_trigger in &triggers {
-            match &action_trigger.trigger_type {
-                ActionTriggerType::AbilityWithinPhases(
-                    _,
-                    mana_requirement,
-                    phase_restrictions,
-                    tap_required,
-                ) => {
-                    if trigger_id != action_trigger.id {
-                        continue;
-                    }
-                    mana_requirements = mana_requirement.clone();
-                    let in_phases = phase_restrictions.is_none()
-                        || phase_restrictions.as_ref().unwrap().0.contains(&turn_phase);
+        let triggers = {
+            let card = card_arc.lock().await.clone();
+            card.abilities(
+                turn_phase,
+                in_play,
+                Some((card_arc.clone(), Arc::clone(game))),
+            )
+            .await
+        };
 
-                    let meets_requirements = (action_trigger.requirements)(
-                        Arc::clone(&game),
-                        Arc::clone(&card_arc),
-                        trigger_id.clone(),
+        let mut is_mana_ability = false;
+        let action_trigger = triggers.iter().find(|t| t.id == trigger_id);
+        if let Some(action_trigger) = action_trigger {
+            mana_requirements = action_trigger.mana_cost.clone();
+            match &action_trigger.required_target {
+                CardRequiredTarget::CardOfType(card_type, card_target_team, tap_required) => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
                     )
                     .await;
 
-                    if in_phases && meets_requirements {
-                        requires_tap = tap_required.clone();
-                        actions.push(Arc::new(CardActionWrapper {
-                            card: Arc::clone(&card_arc),
-                            action: action_trigger.action.clone(),
-                            target: target.clone(),
-                            ability_id: Some(action_trigger.id.clone()),
-                        }));
+                    if let Some(tap_required) = tap_required {
+                        let tapped = card.lock().await.tapped;
+                        if tapped && !*tap_required {
+                            return Err(format!("Card must be not tapped."));
+                        }
+                        if !tapped && *tap_required {
+                            return Err(format!("Card must be tapped."));
+                        }
+                    }
+
+                    if card.lock().await.card_type != *card_type {
+                        return Err(format!("Looking for card of type {:?}", card_type));
                     }
                 }
-                _ => {}
+                CardRequiredTarget::BasicLand(card_target_team, _) => todo!(),
+                CardRequiredTarget::CreatureOfType(
+                    creature_type,
+                    card_target_team,
+                    tap_required,
+                ) => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
+                    )
+                    .await;
+
+                    if card.lock().await.creature_type != Some(creature_type.clone()) {
+                        return Err(format!("Looking for creature of type {:?}", creature_type));
+                    }
+                }
+                CardRequiredTarget::EnemyCardInCombat => {
+                    let card = Game::card_from_frontend_target(
+                        &game,
+                        &target
+                            .clone()
+                            .ok_or_else(|| format!("Please select a target"))?,
+                    )
+                    .await;
+                    if game
+                        .lock()
+                        .await
+                        .combat
+                        .attackers
+                        .iter()
+                        .find(|(find_card, _)| Arc::ptr_eq(&card, find_card))
+                        .is_none()
+                    {
+                        return Err(format!("Looking for a creature in combat"));
+                    }
+                }
+                CardRequiredTarget::Spell => todo!(),
+                CardRequiredTarget::MultipleCardsOfType(card_type, _) => todo!(),
+                CardRequiredTarget::CreatureWithPowerAndToughness(_, _, card_target_team) => {
+                    todo!()
+                }
+                _ => (),
             }
+
+            if action_trigger.meets_mana_requirements
+                && action_trigger.meets_requirements_except_mana
+            {
+                if let Some(action) = action_trigger.action.clone() {
+                    if action
+                        .as_any()
+                        .downcast_ref::<GenerateManaAction>()
+                        .is_some()
+                    {
+                        is_mana_ability = true;
+                    }
+                }
+                requires_tap = action_trigger.tap_required.clone();
+                if action_trigger.id == "play_card" {
+                    mana_requirements = card_arc.lock().await.cost.clone();
+                }
+                actions.push(Arc::new(CardActionWrapper {
+                    card: Arc::clone(&card_arc),
+                    action: action_trigger.action.clone().expect("No action??"),
+                    target: target.clone(),
+                    ability_id: Some(action_trigger.id.clone()),
+                }));
+            } else {
+                return Err("Does not meet requirements.".to_string());
+            }
+        } else {
+            return Err("Unable to find ability.".to_string());
         }
 
-        (actions, requires_tap, mana_requirements)
+        let action_type = if is_mana_ability || !card_arc.lock().await.card_type.is_spell() {
+            ActionType::ManaAbility
+        } else if trigger_id == "play_card".to_string() {
+            ActionType::Spell
+        } else {
+            ActionType::ActivatedAbility
+        };
+
+        Ok((actions, requires_tap, mana_requirements, action_type))
     }
 
     pub async fn collect_card_destroyed_actions(
@@ -409,59 +986,52 @@ impl Card {
         actions
     }
 
-    pub async fn collect_phase_based_actions(
-        card_arc: &Arc<Mutex<Card>>,
-        turn: &Turn,
-        trigger_type: ActionTriggerType,
-    ) -> Vec<Arc<dyn Action + Send + Sync>> {
-        let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
+    // pub async fn collect_phase_based_actions(
+    //     card_arc: &Arc<Mutex<Card>>,
+    //     turn: &Turn,
+    //     trigger_type: ActionTriggerType,
+    // ) -> Vec<Arc<dyn Action + Send + Sync>> {
+    //     let mut phase_based_actions: Vec<Arc<dyn Action + Send + Sync>> = Vec::new();
 
-        let card = card_arc.lock().await;
+    //     let card = card_arc.lock().await;
 
-        let owner = match &card.owner {
-            Some(owner) => Arc::clone(owner),
-            None => return phase_based_actions,
-        };
+    //     let owner = match &card.owner {
+    //         Some(owner) => Arc::clone(owner),
+    //         None => return phase_based_actions,
+    //     };
 
-        for action_trigger in &card.triggers {
-            if let ActionTriggerType::PhaseStarted(trigger_phase, trigger_target) =
-                &action_trigger.trigger_type
-            {
-                let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
-                if trigger_phase.contains(&turn.phase)
-                    && match trigger_target {
-                        super::action::TriggerTarget::Owner => is_owner,
-                        super::action::TriggerTarget::Opponent => !is_owner,
-                        super::action::TriggerTarget::Any => true,
-                    }
-                {
-                    phase_based_actions.push(Arc::new(CardActionWrapper {
-                        card: Arc::clone(card_arc),
-                        action: action_trigger.action.clone(),
-                        target: match trigger_target {
-                            action::TriggerTarget::Owner => {
-                                Some(EffectTarget::Player(Arc::clone(&owner)))
-                            }
-                            action::TriggerTarget::Opponent => {
-                                card_arc.lock().await.action_target.clone()
-                            }
-                            action::TriggerTarget::Any => None,
-                        },
-                        ability_id: Some(action_trigger.id.clone()),
-                    }));
-                }
-            } else if &trigger_type == &action_trigger.trigger_type {
-                phase_based_actions.push(Arc::new(CardActionWrapper {
-                    card: Arc::clone(card_arc),
-                    action: action_trigger.action.clone(),
-                    target: None,
-                    ability_id: Some(action_trigger.id.clone()),
-                }));
-            }
-        }
+    //     for action_trigger in &card.triggers {
+    //         if let ActionTriggerType::PhaseStarted(trigger_phase, phase_target) =
+    //             &action_trigger.trigger_type
+    //         {
+    //             let target = card_arc.lock().await.target.clone();
+    //             let is_owner = Arc::ptr_eq(&turn.current_player, &owner);
+    //             if trigger_phase.contains(&turn.phase)
+    //                 && match phase_target {
+    //                     super::action::PhaseTarget::Owner => is_owner,
+    //                     super::action::PhaseTarget::Opponent => !is_owner,
+    //                     super::action::PhaseTarget::Any => true,
+    //                 }
+    //             {
+    //                 phase_based_actions.push(Arc::new(CardActionWrapper {
+    //                     card: Arc::clone(card_arc),
+    //                     action: action_trigger.action.clone(),
+    //                     target,
+    //                     ability_id: Some(action_trigger.id.clone()),
+    //                 }));
+    //             }
+    //         } else if &trigger_type == &action_trigger.trigger_type {
+    //             phase_based_actions.push(Arc::new(CardActionWrapper {
+    //                 card: Arc::clone(card_arc),
+    //                 action: action_trigger.action.clone(),
+    //                 target: None,
+    //                 ability_id: Some(action_trigger.id.clone()),
+    //             }));
+    //         }
+    //     }
 
-        phase_based_actions
-    }
+    //     phase_based_actions
+    // }
 
     pub fn format_mana_cost(&self) -> String {
         let mut formatted_mana = String::new();
@@ -588,8 +1158,8 @@ impl Card {
 
 #[async_trait::async_trait]
 impl Stats for Card {
-    async fn add_stat(&mut self, id: String, stat: Stat) {
-        self.stats.add_stat(id, stat).await;
+    fn add_stat(&mut self, id: String, stat: Stat) {
+        self.stats.add_stat(id, stat);
         println!("{}", self.render(30).join("\n"));
     }
 
@@ -597,12 +1167,12 @@ impl Stats for Card {
         self.stats.get_stat_value(stat_type)
     }
 
-    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
-        self.stats.modify_stat(stat_type, intensity).await;
+    fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
+        self.stats.modify_stat(stat_type, intensity);
     }
 
-    async fn remove_stat(&mut self, id: String) {
-        self.stats.remove_stat(id).await;
+    fn remove_stat(&mut self, id: String) {
+        self.stats.remove_stat(id);
     }
 }
 
@@ -688,13 +1258,13 @@ pub mod card {
                         let mut triggers = vec![
                             // Action to declare the creature as an attacker in the Declare Attackers phase
                             CardActionTrigger::new(
-                                ActionTriggerType::AbilityWithinPhases("Attack".to_string(), vec![], Some((vec![TurnPhase::DeclareAttackers], TriggerTarget::Owner)), true),
+                                ActionTriggerType::AbilityWithinPhases("Attack".to_string(), vec![], Some((vec![TurnPhase::DeclareAttackers], PhaseTarget::Owner)), true),
                                 CardRequiredTarget::EnemyCardOrPlayer,
                                 Arc::new(DeclareAttackerAction {}),
                             ),
                             // Action to manually declare the creature as a blocker in the Declare Blockers phase
                             CardActionTrigger::new(
-                                ActionTriggerType::AbilityWithinPhases("Block".to_string(), vec![], Some((vec![TurnPhase::DeclareBlockers], TriggerTarget::Any)), false),
+                                ActionTriggerType::AbilityWithinPhases("Block".to_string(), vec![], Some((vec![TurnPhase::DeclareBlockers], PhaseTarget::Any)), false),
                                 CardRequiredTarget::EnemyCardInCombat,
                                 Arc::new(DeclareBlockerAction {}),
                             ),

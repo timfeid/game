@@ -1,8 +1,8 @@
 use crate::game::{
     action::{
         generate_mana::GenerateManaAction, ActionTriggerType, AsyncClosureAction,
-        AsyncClosureWithCardAction, CardActionTrigger, CardRequiredTarget, DeclareAttackerAction,
-        DeclareBlockerAction, PlayerActionTarget, TriggerTarget,
+        CardActionTrigger, CardRequiredTarget, DeclareAttackerAction, DeclareBlockerAction,
+        PhaseTarget, PlayerActionTarget,
     },
     card::{
         card::{create_creature_card, create_multiple_cards},
@@ -94,11 +94,11 @@ mod test {
         let ga = Arc::new(Mutex::new(game));
         // Game::process_action_queue(ga.clone(), hydra.clone().unwrap()).await;
 
-        ga.lock()
-            .await
-            .activate_card_action_old(&player, 1, None)
-            .await
-            .expect("oh no?");
+        // ga.lock()
+        //     .await
+        //     .activate_card_action_old(&player, 1, None)
+        //     .await
+        //     .expect("oh no?");
 
         ga.lock().await.print().await;
 

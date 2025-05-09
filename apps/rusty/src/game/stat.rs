@@ -20,10 +20,10 @@ pub struct Stat {
 }
 #[async_trait::async_trait]
 pub trait Stats: Debug + Send + Sync {
-    async fn add_stat(&mut self, id: String, stat: Stat);
-    async fn remove_stat(&mut self, id: String);
+    fn add_stat(&mut self, id: String, stat: Stat);
+    fn remove_stat(&mut self, id: String);
     fn get_stat_value(&self, stat_type: StatType) -> i16;
-    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16);
+    fn modify_stat(&mut self, stat_type: StatType, intensity: i16);
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Type)]
@@ -33,10 +33,11 @@ pub struct StatManager {
     pub listeners: Vec<Arc<Box<dyn CardStatChangeListener + Send + Sync>>>, // Use Arc<Mutex> for shared ownership
 }
 
-#[derive(Type, Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatType {
     Health,
     Power,
+    LuckToken,
     Toughness,
     Trample,
     Lifelink,
@@ -45,7 +46,6 @@ pub enum StatType {
     Regenerate,
     Deathtouch,
     Vigilance,
-    Counter,
     Haist,
 }
 
@@ -95,9 +95,8 @@ impl fmt::Display for StatType {
 
 #[async_trait::async_trait]
 impl Stats for StatManager {
-    async fn add_stat(&mut self, id: String, stat: Stat) {
+    fn add_stat(&mut self, id: String, stat: Stat) {
         self.stats.insert(id, stat);
-        self.notify_listeners().await;
     }
 
     fn get_stat_value(&self, stat_type: StatType) -> i16 {
@@ -106,21 +105,20 @@ impl Stats for StatManager {
             .iter()
             .filter(|(_id, s)| s.stat_type == stat_type)
             .map(|(_id, s)| s.intensity)
+            .filter(|i| i != &0)
             .sum()
     }
 
-    async fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
+    fn modify_stat(&mut self, stat_type: StatType, intensity: i16) {
         for stat in &mut self.stats.values_mut() {
             if stat.stat_type == stat_type {
                 stat.intensity += intensity;
             }
         }
-        self.notify_listeners().await;
     }
 
-    async fn remove_stat(&mut self, id: String) {
+    fn remove_stat(&mut self, id: String) {
         self.stats.remove(&id);
-        self.notify_listeners().await;
     }
 }
 
@@ -142,9 +140,13 @@ impl StatManager {
         self.listeners.push(listener);
     }
 
-    async fn notify_listeners(&self) {
-        for listener in &self.listeners {
-            listener.on_stat_change(self).await;
+    pub fn to_hashmap(&self) -> HashMap<StatType, i16> {
+        let mut aggregated_stats = HashMap::new();
+
+        for stat in self.stats.values() {
+            *aggregated_stats.entry(stat.stat_type.clone()).or_insert(0) += stat.intensity;
         }
+
+        aggregated_stats
     }
 }

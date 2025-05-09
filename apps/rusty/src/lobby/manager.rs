@@ -9,8 +9,11 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::timeout;
 use tokio_stream::wrappers::ReceiverStream;
+use ulid::Ulid;
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -22,12 +25,12 @@ use crate::game::card::Card;
 use crate::game::effects::EffectTarget;
 use crate::game::mana::ManaType;
 use crate::game::player::Player;
-use crate::game::stat::Stats;
+use crate::game::stat::{StatType, Stats};
 use crate::game::{
     ActionType, CardWithDetails, FrontendPileName, FrontendTarget, Game, GameStatus, PlayerStatus,
 };
 use crate::http::controllers::lobby::{
-    ActionCardArgs, PlayCardArgs, RespondCardSelection, RespondMandatoryAbility,
+    ActionCardArgs, RespondCardSelection, RespondCardSelectionButton, RespondMandatoryAbility,
     RespondOptionalAbility,
 };
 use crate::services::jwt::{Claims, JwtService};
@@ -43,11 +46,45 @@ pub struct LobbyTurnMessage {
     pub messages: Vec<String>,
 }
 
+#[derive(Type, Deserialize, Clone, Serialize)]
+pub struct ModalButton {
+    pub id: String,
+    pub text: String,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    pub action: Option<
+        Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>,
+    >,
+}
+impl ModalButton {
+    pub(crate) fn new<F>(text: &str, action: F) -> Self
+    where
+        F: Fn() -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync + 'static,
+    {
+        Self {
+            id: Ulid::new().to_string(),
+            text: text.to_string(),
+            action: Some(Arc::new(action)),
+        }
+    }
+}
+
+impl std::fmt::Debug for ModalButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModalButton")
+            .field("id", &self.id)
+            .field("text", &self.text)
+            .finish()
+    }
+}
+
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
 pub struct CardSelectionDetails {
     pub player_id: String,
     pub cards: Vec<CardWithDetails>,
-    pub valid_card_indexes: Vec<i32>,
+    pub selection_required: bool,
+    pub message: String,
+    pub buttons: Vec<ModalButton>,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -55,13 +92,16 @@ pub struct AbilityDetails {
     pub mana_cost: Vec<ManaType>,
     pub required_target: CardRequiredTarget,
     pub description: String,
-    pub action_type: ActionType,
     pub show: bool,
     pub id: String,
     pub meets_requirements_except_mana: bool,
     pub meets_mana_requirements: bool,
     pub can_pay_mana: bool,
     pub owner_player_id: Option<String>,
+    pub tap_required: bool,
+
+    #[serde(skip_serializing, skip_deserializing)]
+    pub action: Option<Arc<dyn CardAction + Send + Sync>>,
 }
 
 #[derive(Type, Deserialize, Clone, Serialize, Debug)]
@@ -75,7 +115,6 @@ impl ExecuteAbility {
     pub fn new(
         player_id: String,
         card: CardWithDetails,
-        action_type: ActionType,
         mana_cost: Vec<ManaType>,
         required_target: CardRequiredTarget,
         description: String,
@@ -83,6 +122,7 @@ impl ExecuteAbility {
         meets_requirements_except_mana: bool,
         meets_mana_requirements: bool,
         can_pay_mana: bool,
+        action: Option<Arc<dyn CardAction + Send + Sync>>,
     ) -> Self {
         Self {
             card,
@@ -90,13 +130,14 @@ impl ExecuteAbility {
                 mana_cost,
                 required_target,
                 description,
-                action_type,
                 show: true,
                 id,
                 meets_requirements_except_mana,
                 meets_mana_requirements,
                 can_pay_mana,
                 owner_player_id: Some(player_id.clone()),
+                tap_required: false,
+                action,
             },
             player_id,
         }
@@ -130,7 +171,7 @@ impl LobbyManager {
         let lobby_id = lobby.data.join_code.clone();
         let lobby_manager_weak = Arc::downgrade(self);
         let lobby_id_clone = lobby_id.clone();
-        let game_arc_clone = lobby.cloned_game().await;
+        let game_arc_clone = lobby.cloned_game();
 
         lobbies.insert(lobby_id.clone(), Arc::new(Mutex::new(lobby)));
 
@@ -240,61 +281,13 @@ impl LobbyManager {
         // TODO: check if current turn is user's turn..
         {
             let hash_map = self.lobbies.lock().await;
-            let lobby = hash_map.get(lobby_id)?;
+            let lobby = Arc::clone(hash_map.get(lobby_id)?);
+            // let lobby = lobby.lock().await;
             lobby.lock().await.advance_turn().await;
         }
         // lobby.lock().await.message(user, args.text);
-        self.notify_lobby(lobby_id).await.ok();
 
         Some(())
-    }
-
-    pub async fn convert(
-        target: Option<FrontendTarget>,
-        lobby: &Arc<Mutex<Lobby>>,
-    ) -> Option<EffectTarget> {
-        match target {
-            Some(target) => match target {
-                FrontendTarget::Card(frontend_card_target) => {
-                    let card = &lobby
-                        .lock()
-                        .await
-                        .cloned_game()
-                        .await
-                        .lock()
-                        .await
-                        .card_from_frontend_target(frontend_card_target)
-                        .await;
-                    Some(EffectTarget::Card(Arc::clone(card)))
-                }
-                FrontendTarget::Player(player_index) => Some(EffectTarget::Player(Arc::clone(
-                    &lobby.lock().await.cloned_game().await.lock().await.players
-                        [player_index as usize],
-                ))),
-            },
-            None => None,
-        }
-    }
-
-    pub async fn attach_card(&self, args: ActionCardArgs, user: &Claims) -> AppResult<()> {
-        let lobby_id = args.code;
-        {
-            let hash_map = self.lobbies.lock().await;
-            let lobby = hash_map
-                .get(&lobby_id)
-                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = Self::convert(args.target, lobby).await;
-            lobby
-                .lock()
-                .await
-                .attach_card(args.card.player_id, args.card.card_index as usize, target)
-                .await?;
-            println!("attached card, notifying lobby");
-        }
-        // lobby.lock().await.message(user, args.text);
-        self.notify_lobby(&lobby_id).await.ok();
-
-        Ok(())
     }
 
     pub async fn action_card(&self, args: ActionCardArgs, user: &Claims) -> AppResult<()> {
@@ -304,11 +297,41 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = { Self::convert(args.target, lobby).await };
+            let mut lobby = lobby.lock().await;
+            lobby
+                .action_card(args.card, args.target, args.trigger_id)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn respond_card_selection_button(
+        &self,
+        args: RespondCardSelectionButton,
+        user: &Claims,
+    ) -> AppResult<()> {
+        let lobby_id = args.code;
+        {
+            let hash_map = self.lobbies.lock().await;
+            let lobby = hash_map
+                .get(&lobby_id)
+                .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
+            let player = lobby
+                .lock()
+                .await
+                .data
+                .game_state
+                .players
+                .get(&user.sub)
+                .unwrap()
+                .player
+                .clone();
+
             lobby
                 .lock()
                 .await
-                .action_card(args.card, target, args.trigger_id)
+                .respond_card_selection_button(player, args.button_id)
                 .await?;
         }
         // lobby.lock().await.message(user, args.text);
@@ -328,7 +351,6 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = { Self::convert(args.target, lobby).await };
             let player = lobby
                 .lock()
                 .await
@@ -343,7 +365,7 @@ impl LobbyManager {
             lobby
                 .lock()
                 .await
-                .respond_card_selection(player, target)
+                .respond_card_selection(player, args.target)
                 .await?;
         }
         // lobby.lock().await.message(user, args.text);
@@ -363,7 +385,6 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = { Self::convert(args.target, lobby).await };
             let player = lobby
                 .lock()
                 .await
@@ -378,7 +399,7 @@ impl LobbyManager {
             lobby
                 .lock()
                 .await
-                .respond_mandatory_player_ability(args.ability_id, player, target)
+                .respond_mandatory_player_ability(args.ability_id, player, args.target)
                 .await?;
         }
         // lobby.lock().await.message(user, args.text);
@@ -398,7 +419,6 @@ impl LobbyManager {
             let lobby = hash_map
                 .get(&lobby_id)
                 .ok_or_else(|| AppError::BadRequest("Bad lobby".to_string()))?;
-            let target = { Self::convert(args.target, lobby).await };
             let player = lobby
                 .lock()
                 .await
@@ -413,7 +433,12 @@ impl LobbyManager {
             lobby
                 .lock()
                 .await
-                .respond_optional_player_ability(args.ability_id, player, target, args.response)
+                .respond_optional_player_ability(
+                    args.ability_id,
+                    player,
+                    args.target,
+                    args.response,
+                )
                 .await?;
         }
         // lobby.lock().await.message(user, args.text);
@@ -422,46 +447,10 @@ impl LobbyManager {
         Ok(())
     }
 
-    pub async fn play_card(&self, args: PlayCardArgs, user: &Claims) -> AppResult<()> {
-        let lobby_id = args.code.clone();
-        let lobby_arc = self.get_lobby(&lobby_id).await?;
-        let (player_arc, card_arc) = {
-            let lobby = lobby_arc.lock().await;
-            let player = Arc::clone(&lobby.data.game_state.players.get(&user.sub).unwrap().player);
-            let card =
-                player.clone().lock().await.cards_in_hand[args.in_hand_index as usize].clone();
-            (player, card)
-        };
-        let target = Self::convert(args.target, &lobby_arc).await;
-        let game_arc = {
-            let lobby = lobby_arc.lock().await;
-            lobby.cloned_game().await
-        };
-        let lobby_manager_clone = self.clone();
-        let lobby_id_clone = lobby_id.clone();
-
-        Game::play_card(
-            &game_arc,
-            &player_arc,
-            args.in_hand_index as usize,
-            target.clone(),
-        )
-        .await
-        .map_err(|x| AppError::BadRequest(x))?;
-
-        // let ga = Arc::clone(&game_arc);
-        // tokio::spawn(async move {
-        //     Game::process_action_queue(ga, card_arc).await;
-        // });
-
-        // Return immediately
-        Ok(())
-    }
-
     pub async fn update_game_state(&self, lobby_id: &str) {
         let hash_map = self.lobbies.lock().await;
         let mut lobby = hash_map.get(lobby_id).unwrap().lock().await;
-        let game = lobby.cloned_game().await;
+        let game = lobby.cloned_game();
         match lobby.data.game_state.status {
             GameStatus::NeedsPlayers => {
                 let all_ready = lobby
@@ -503,17 +492,22 @@ impl LobbyManager {
                     let player_spells = &player.player.lock().await.spells.clone();
                     let player_cards_in_hand = &player.player.lock().await.cards_in_hand.clone();
 
-                    for card in player_cards_in_play {
-                        cards_in_play
-                            .push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
+                    for (_, card) in player_cards_in_play {
+                        cards_in_play.push(
+                            CardWithDetails::from_card_arc(game.clone(), Arc::clone(card)).await,
+                        );
                     }
 
                     for card in player_spells {
-                        spells.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
+                        spells.push(
+                            CardWithDetails::from_card_arc(game.clone(), Arc::clone(card)).await,
+                        );
                     }
 
                     for card in player_cards_in_hand {
-                        hand.push(CardWithDetails::from_card_arc(Arc::clone(card), &game).await);
+                        hand.push(
+                            CardWithDetails::from_card_arc(game.clone(), Arc::clone(card)).await,
+                        );
                     }
 
                     {
@@ -523,9 +517,8 @@ impl LobbyManager {
                         player.public_info.hand_size = hand.len() as i32;
                         player.public_info.cards_in_play = cards_in_play;
                         player.public_info.mana_pool = game_player.mana_pool.clone();
-                        player.public_info.health = game_player
-                            .stat_manager
-                            .get_stat_value(crate::game::stat::StatType::Health);
+                        player.public_info.health =
+                            game_player.stat_manager.get_stat_value(StatType::Health);
                     }
                     player.hand = hand;
                 }

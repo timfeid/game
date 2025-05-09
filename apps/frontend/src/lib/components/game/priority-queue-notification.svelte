@@ -4,21 +4,17 @@
 	export let game: GameState;
 	export let turnMessage: LobbyTurnMessage | undefined;
 
-	$: player =
-		game.public_info.priority_queue?.player_index !== undefined
-			? Object.keys(game.players).find(
-					(p) => game.players[p].player_index === game.public_info.priority_queue!.player_index
-				)
-			: null;
+	$: console.log(game.public_info.priority_queue);
 </script>
 
 {#if game.public_info.priority_queue}
 	<div class="text-center">
-		{player}'s priority queue
+		{game.public_info.priority_queue?.player_id || ''}'s priority queue
 		{game.public_info.priority_queue.time_left}s
 	</div>
-{:else if turnMessage}
-	<div
+{/if}
+{#if turnMessage}
+	<!-- <div
 		class="relative text-center text-xs w-full flex flex-col justify-end h-16 pb-6 overflow-hidden"
 	>
 		{#each turnMessage.messages as message, index}
@@ -32,9 +28,16 @@
 				{message}
 			</div>
 		{/each}
-		<!-- Overlay for the fade effect -->
 		<div
-			class="absolute top-0 left-0 w-full h-16 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
+			class=" test absolute top-0 left-0 w-full h-16 bg-gradient-to-b from-white dark:from-gray-950 to-transparent pointer-events-none"
 		></div>
-	</div>
+	</div> -->
 {/if}
+
+<style lang="css">
+	.test {
+		-webkit-background-clip: text;
+		background-clip: text;
+		-webkit-text-fill-color: transparent;
+	}
+</style>
